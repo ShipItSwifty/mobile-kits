@@ -76,3 +76,27 @@ struct RepositoryInspectorTests {
         #expect(RepositoryInspector().inspect(scratch.url.path).primaryFramework == .native)
     }
 }
+
+@Suite("FrameworkDetector")
+struct FrameworkDetectorTests {
+    @Test("Root and first-level modules decide; a nested example app does not")
+    func precedence() throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let root = scratch.url
+        func write(_ path: String, _ text: String) throws {
+            let url = root.appending(path: path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        #expect(FrameworkDetector.detect(in: root.path) == nil)
+        try write("examples/rn/package.json", #"{"dependencies": {"react-native": "1"}}"#)
+        #expect(FrameworkDetector.detect(in: root.path) == nil, "two levels down is not this app")
+        try write("shared/build.gradle.kts", #"plugins { kotlin("multiplatform") }"#)
+        #expect(FrameworkDetector.detect(in: root.path) == .kmp)
+        try write("package.json", #"{"devDependencies": {"react-native": "1"}}"#)
+        #expect(FrameworkDetector.detect(in: root.path) == .reactNative)
+        try write("pubspec.yaml", "name: a\nflutter:\n")
+        #expect(FrameworkDetector.detect(in: root.path) == .flutter)
+    }
+}
