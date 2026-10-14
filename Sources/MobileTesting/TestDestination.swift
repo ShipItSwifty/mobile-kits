@@ -170,7 +170,7 @@ extension TestDestination {
     /// Kotlin Multiplatform names the target in the task (`iosSimulatorArm64Test`, `jvmTest`); Android local
     /// unit tests are `test<Variant>UnitTest` and run on the host JVM but belong to Android. An unrecognized
     /// task yields `unknown` rather than a guess.
-    static func gradle(task: String, device: String? = nil) -> TestDestination {
+    public static func gradle(task: String, device: String? = nil) -> TestDestination {
         let name = task.split(separator: ":").last.map(String.init) ?? task
         if name.hasPrefix("connected") {
             let emulator = device.map { $0.localizedCaseInsensitiveContains("avd") || $0.localizedCaseInsensitiveContains("emulator") }
@@ -203,7 +203,7 @@ extension TestDestination {
     ///
     /// - Parameter resolvedName: The human device name from a result bundle. A specifier that identifies the
     ///   device only by UDID (`id=`) would otherwise name it by that UDID, which differs on every machine.
-    static func xcode(specifier: String, plan: String? = nil, resolvedName: String? = nil) -> TestDestination {
+    public static func xcode(specifier: String, plan: String? = nil, resolvedName: String? = nil) -> TestDestination {
         var fields: [String: String] = [:]
         for part in specifier.split(separator: ",") {
             let pair = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -217,7 +217,7 @@ extension TestDestination {
 
     /// The destination for an Xcode platform name (`iOS Simulator`, `macOS`, `tvOS`) as `xcodebuild` and
     /// `xcresulttool` spell it.
-    static func xcode(platformName: String?, name: String?, plan: String? = nil) -> TestDestination {
+    public static func xcode(platformName: String?, name: String?, plan: String? = nil) -> TestDestination {
         let platform = platformName?.lowercased() ?? ""
         let kind: TestDestinationKind = platform.contains("simulator") ? .simulator : (platform.hasPrefix("macos") ? .host : .device)
         let resolved: TestPlatform
