@@ -144,7 +144,10 @@ public struct SimulatorManager: Sendable {
         let outcome: BootOutcome
         if output.exitCode == 0 {
             outcome = .booted
-        } else if (output.stderr + output.stdout).contains("current state: Booted") {
+        } else if (output.stderr + output.stdout).contains("current state: Booted")
+            || (output.stderr + output.stdout).contains("current state: Booting")
+        {
+            // Already running, or another caller is booting it: wait for it either way.
             outcome = .alreadyBooted
         } else {
             throw MobileKitError.commandFailed(

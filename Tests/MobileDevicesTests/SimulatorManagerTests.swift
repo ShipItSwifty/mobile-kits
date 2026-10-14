@@ -53,6 +53,15 @@ struct SimulatorManagerTests {
         #expect(commands.withLock { $0 } == [["simctl", "boot", "U"], ["simctl", "bootstatus", "U", "-b"]])
     }
 
+    @Test("Racing another booter waits instead of failing")
+    func bootWhileBooting() async throws {
+        let executor = MockExecutor { command, _ in
+            command.arguments.contains("boot")
+                ? ShellOutput(stderr: "Unable to boot device in current state: Booting", exitCode: 149) : ShellOutput(exitCode: 0)
+        }
+        #expect(try await SimulatorManager(shell: ShellContext(executor: executor)).boot("U") == .alreadyBooted)
+    }
+
     @Test("A real boot failure surfaces the command and stderr")
     func bootFailure() async {
         let executor = MockExecutor { _, _ in ShellOutput(stderr: "Invalid device: U", exitCode: 148) }
