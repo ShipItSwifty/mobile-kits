@@ -139,17 +139,17 @@ public struct XcodeTestRunner: Sendable {
                 reason: XcodeBuildLogSummary.parse(log.stdout).resultLine ?? "xcodebuild wrote no result bundle")
         }
         #if os(macOS)
-        let run = try await IOSXCResultTestParser(shell: shell).parse(xcresultPath: resultBundlePath)
-        #else
-        throw MobileKitError.unsupportedHost("Reading .xcresult bundles requires macOS and Xcode.")
-        #endif
-        guard run.hasResults else {
+        let parsed = try await IOSXCResultTestParser(shell: shell).parse(xcresultPath: resultBundlePath)
+        guard parsed.hasResults else {
             throw TestExecutionFailure(
                 command: argv, exitCode: log.exitCode, output: log, reason: "The result bundle holds no test outcomes")
         }
         return TestExecution(
-            run: run, status: .completed, exitCode: log.exitCode, output: log, command: argv, artifacts: [resultBundlePath],
+            run: parsed, status: .completed, exitCode: log.exitCode, output: log, command: argv, artifacts: [resultBundlePath],
             durationSeconds: duration)
+        #else
+        throw MobileKitError.unsupportedHost("Reading .xcresult bundles requires macOS and Xcode.")
+        #endif
     }
 }
 
