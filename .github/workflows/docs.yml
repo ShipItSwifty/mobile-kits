@@ -1,0 +1,65 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app
+      - name: Build DocC site
+        run: |
+          swift package --allow-writing-to-directory ./docs-output \
+            generate-documentation \
+            --enable-experimental-combined-documentation \
+            --target MobileCore --target MobileDevices --target MobileBuild --target MobileTesting --target MobileProject \
+            --disable-indexing \
+            --transform-for-static-hosting \
+            --hosting-base-path mobile-kits \
+            --output-path ./docs-output
+      - name: Add root redirect to documentation
+        run: |
+          cat > ./docs-output/index.html <<'HTML'
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=documentation/">
+              <link rel="canonical" href="documentation/">
+              <title>Mobile Kits Documentation</title>
+            </head>
+            <body>
+              <p>Redirecting to <a href="documentation/">Mobile Kits documentation</a>…</p>
+            </body>
+          </html>
+          HTML
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: ./docs-output
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.1

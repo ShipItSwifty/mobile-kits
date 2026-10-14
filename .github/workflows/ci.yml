@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app
+      - name: Format lint
+        run: swift format lint --recursive --strict --configuration .swift-format Sources Tests Package.swift
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+
+  linux:
+    name: Linux (Swift ${{ matrix.swift }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.2", "6.4"]
+    container: swift:${{ matrix.swift }}-noble
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
