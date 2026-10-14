@@ -1,5 +1,10 @@
 # mobile-kits
 
+[![CI](https://github.com/ShipItSwifty/mobile-kits/actions/workflows/ci.yml/badge.svg)](https://github.com/ShipItSwifty/mobile-kits/actions/workflows/ci.yml)
+[![Documentation](https://github.com/ShipItSwifty/mobile-kits/actions/workflows/docs.yml/badge.svg)](https://shipitswifty.github.io/mobile-kits/documentation/)
+![Swift 6.2+](https://img.shields.io/badge/Swift-6.2%2B-orange)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey)
+
 The mechanisms mobile automation needs, as Swift libraries: build apps across build systems, manage
 simulators, emulators, and devices (including recovering hung ones), coordinate device ownership
 between tools, run tests, and read every native result format into one model.
@@ -33,7 +38,9 @@ Swift 6.2+, macOS 15+ or Linux. On Linux, Apple-only operations throw `MobileKit
 import MobileDevices
 
 let simulators = SimulatorManager()
-let phone = try await simulators.list().first { $0.name == "iPhone 16" && $0.osName == "iOS" }!
+guard let phone = try await simulators.list().first(where: { $0.name == "iPhone 16" && $0.osName == "iOS" }) else {
+    fatalError("No iPhone 16 simulator")
+}
 if try await simulators.boot(phone.udid) == .booted { /* this call booted it; shut it down later */ }
 if await !simulators.isResponsive(phone.udid) {
     _ = try await simulators.recover(phone.udid)
@@ -54,11 +61,19 @@ import MobileTesting
 
 let build = try await XcodeBuilder(output: .streaming).buildForTesting(
     XcodeBuildRequest(container: .workspace("App.xcworkspace"), scheme: "App", destination: .anyIOSSimulator))
-let xctestrun = build.artifacts(.xctestrun).first!
+guard let xctestrun = build.artifacts(.xctestrun).first else { fatalError("build-for-testing wrote no .xctestrun") }
 let execution = try await XcodeTestRunner().testWithoutBuilding(
     xctestrun: xctestrun, destination: .simulator(udid: phone.udid), resultBundlePath: "build/run.xcresult")
 print(execution.run.summary)
 ```
+
+## Documentation
+
+API documentation: <https://shipitswifty.github.io/mobile-kits/documentation/>
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
