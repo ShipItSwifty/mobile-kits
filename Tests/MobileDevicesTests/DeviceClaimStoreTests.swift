@@ -142,3 +142,40 @@ struct DeviceClaimStoreTests {
         second.release()
     }
 }
+
+@Suite("DeviceSessionLock across processes")
+struct DeviceSessionLockProcessTests {
+    /// `flock` the lock file from a separate python3 process: exit 7 when it is held, 0 when free.
+    static func probe(_ path: String) throws -> Int32 {
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        child.arguments = [
+            "python3", "-c",
+            "import fcntl, sys\nwith open(sys.argv[1], 'r+') as f:\n    try: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)\n    except BlockingIOError: sys.exit(7)",
+            path,
+        ]
+        try child.run()
+        child.waitUntilExit()
+        return child.terminationStatus
+    }
+
+    static var hasPython: Bool {
+        ["/usr/bin/python3", "/usr/local/bin/python3", "/opt/homebrew/bin/python3"].contains {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }
+    }
+
+    @Test("Another process cannot take a held lock, and releasing never unlinks the file", .enabled(if: hasPython))
+    func excludesOtherProcess() throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let store = DeviceClaimStore(directory: scratch.url)
+        let lock = try DeviceSessionLock(deviceID: "test-phone", store: store)
+        let path = store.fileURL(deviceID: "test-phone").appendingPathExtension("session-lock").path
+        #expect(try Self.probe(path) == 7)
+        #expect(throws: MobileKitError.self) { try store.acquire(platform: .ios, deviceID: "test-phone") }
+        lock.release()
+        #expect(FileManager.default.fileExists(atPath: path))
+        #expect(try Self.probe(path) == 0)
+    }
+}
