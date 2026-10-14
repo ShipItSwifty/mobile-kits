@@ -24,6 +24,10 @@ public struct EmulatorBootOptions: Sendable, Equatable {
     /// Console port (even, 5554–5682). Picks the first free one when `nil`.
     public var port: Int?
     public var additionalArguments: [String]
+    /// Keeps the emulator a child of the caller instead of starting it in its own session, so it
+    /// ends with the caller's process. ``AndroidEmulatorManager/stop(_:grace:)`` then tears the
+    /// child down gracefully. Output is not written to a log file.
+    public var attached: Bool
 
     public init(
         headless: Bool = false,
@@ -32,7 +36,8 @@ public struct EmulatorBootOptions: Sendable, Equatable {
         wipeData: Bool = false,
         readOnly: Bool = false,
         port: Int? = nil,
-        additionalArguments: [String] = []
+        additionalArguments: [String] = [],
+        attached: Bool = false
     ) {
         self.headless = headless
         self.gpu = gpu
@@ -41,6 +46,7 @@ public struct EmulatorBootOptions: Sendable, Equatable {
         self.readOnly = readOnly
         self.port = port
         self.additionalArguments = additionalArguments
+        self.attached = attached
     }
 }
 
@@ -52,17 +58,51 @@ public struct EmulatorInstance: Sendable, Equatable {
     public var avd: String
     /// `emulator-<port>`.
     public var serial: String
-    /// Process id (also its process group: the emulator runs in its own session).
+    /// Process id (also its process group when the emulator runs in its own session).
     public var pid: Int32
     public var logPath: String?
+    /// The child process of an ``EmulatorBootOptions/attached`` emulator; `nil` when detached.
+    public var process: (any SpawnedProcess)?
+
+    public init(avd: String, serial: String, pid: Int32, logPath: String? = nil, process: (any SpawnedProcess)? = nil) {
+        self.avd = avd
+        self.serial = serial
+        self.pid = pid
+        self.logPath = logPath
+        self.process = process
+    }
+
+    public static func == (lhs: EmulatorInstance, rhs: EmulatorInstance) -> Bool {
+        lhs.avd == rhs.avd && lhs.serial == rhs.serial && lhs.pid == rhs.pid && lhs.logPath == rhs.logPath
+    }
+
+    /// Whether the emulator process is alive or gone.
+    public enum Liveness: Sendable, Equatable {
+        case running
+        /// `exitCode` is `nil` when the process is gone but was not our child, so there is no status to reap.
+        case exited(exitCode: Int32?)
+    }
+
+    /// Non-blocking liveness check. A detached child that has exited stays a zombie until reaped, so
+    /// `kill(pid, 0)` alone reports it alive; `waitpid(WNOHANG)` both detects and reaps it.
+    public func liveness() -> Liveness {
+        // An attached child is reaped by its own process handle; reaping it here would race that.
+        if process != nil { return kill(pid, 0) == 0 || errno == EPERM ? .running : .exited(exitCode: nil) }
+        var status: Int32 = 0
+        let result = waitpid(pid, &status, WNOHANG)
+        if result == pid {
+            let exited = (status & 0x7F) == 0
+            return .exited(exitCode: exited ? (status >> 8) & 0xFF : 128 + (status & 0x7F))
+        }
+        if result == -1, errno == ECHILD {
+            return kill(pid, 0) == 0 ? .running : .exited(exitCode: nil)
+        }
+        return .running
+    }
 
     /// Whether the emulator process is still alive. Reaps it when it has exited.
     public func isRunning() -> Bool {
-        var status: Int32 = 0
-        let result = waitpid(pid, &status, WNOHANG)
-        if result == pid { return false }
-        if result == -1, errno == ECHILD { return kill(pid, 0) == 0 }
-        return true
+        liveness() == .running
     }
 
     /// The last `lines` lines of the emulator log, for an error message.
@@ -133,8 +173,8 @@ public struct AndroidEmulatorManager: Sendable {
         return nil
     }
 
-    /// Starts `avd` in its own session (so it can outlive the caller) and returns once the
-    /// process is launched. Call ``waitUntilBooted(_:timeout:)`` before using it.
+    /// Starts `avd` in its own session (so it can outlive the caller; see ``EmulatorBootOptions/attached``
+    /// to keep it a child instead) and returns once the process is launched. Call ``waitUntilBooted(_:timeout:)`` before using it.
     ///
     /// - Parameter logPath: Where emulator output goes; `$TMPDIR/emulator-<port>.log` by default.
     public func start(
@@ -148,20 +188,31 @@ public struct AndroidEmulatorManager: Sendable {
         } else {
             port = try await freeConsolePort()
         }
-        let log = logPath ?? (NSTemporaryDirectory() as NSString).appendingPathComponent("emulator-\(port).log")
-        logger.info("Starting emulator", metadata: ["avd": "\(avd)", "port": "\(port)", "headless": "\(options.headless)"])
-        let emulator = Emulator(context: shell)
+        logger.info(
+            "Starting emulator",
+            metadata: ["avd": "\(avd)", "port": "\(port)", "headless": "\(options.headless)", "attached": "\(options.attached)"])
+        var emulator = Emulator(context: shell)
             .start(
                 avd: avd, headless: options.headless, gpu: options.gpu, snapshot: options.snapshot, wipeData: options.wipeData,
                 readOnly: options.readOnly, port: port, additionalArguments: options.additionalArguments
             )
-            .stdout(.file(path: log, append: true))
-            .stderr(.file(path: log, append: true))
+        let argv = [emulator.command().executableName] + emulator.command().arguments
+        if options.attached {
+            do {
+                let process = try await emulator.spawn(teardown: .graceful)
+                return EmulatorInstance(
+                    avd: avd, serial: "emulator-\(port)", pid: process.processIdentifier, logPath: nil, process: process)
+            } catch let error as ShellError {
+                throw ToolRunner.map(error, argv: argv)
+            }
+        }
+        let log = logPath ?? (NSTemporaryDirectory() as NSString).appendingPathComponent("emulator-\(port).log")
+        emulator = emulator.stdout(.file(path: log, append: true)).stderr(.file(path: log, append: true))
         let pid: Int32
         do {
             pid = try await emulator.spawnDetached()
         } catch let error as ShellError {
-            throw ToolRunner.map(error, argv: [emulator.command().executableName] + emulator.command().arguments)
+            throw ToolRunner.map(error, argv: argv)
         }
         return EmulatorInstance(avd: avd, serial: "emulator-\(port)", pid: pid, logPath: log)
     }
@@ -200,6 +251,10 @@ public struct AndroidEmulatorManager: Sendable {
     public func stop(_ instance: EmulatorInstance, grace: Duration = .seconds(20)) async {
         logger.info("Stopping emulator", metadata: ["serial": "\(instance.serial)"])
         _ = try? await ToolRunner.capture(Adb(context: shell).serial(instance.serial).emuKill(), timeout: .seconds(15))
+        if let process = instance.process {
+            _ = await process.teardownAndWait()
+            return
+        }
         let poller = Poller(timeout: grace, interval: .milliseconds(500))
         if (try? await poller.until("emulator exit") { instance.isRunning() ? nil : true }) != nil { return }
         kill(-instance.pid, SIGTERM)
@@ -224,6 +279,7 @@ public struct AndroidEmulatorManager: Sendable {
         var coldBoot = options
         coldBoot.snapshot = .disabled
         coldBoot.port = instance.emulatorPort
+        coldBoot.attached = instance.process != nil
         let restarted = try await start(avd: instance.avd, options: coldBoot, logPath: instance.logPath)
         try await waitUntilBooted(restarted, timeout: timeout)
         return restarted
