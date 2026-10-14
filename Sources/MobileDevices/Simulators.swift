@@ -74,13 +74,16 @@ public struct RecoveryReport: Sendable, Equatable {
     public var recovered: Bool
 }
 
-/// Inventory, lifecycle, app management, and recovery for iOS Simulators through `simctl`.
+/// Inventory, lifecycle, app management, capture, configuration, and recovery for iOS Simulators
+/// through `simctl`.
+///
+/// Capture lives in `Simulators+Capture.swift` and configuration in `Simulators+Configuration.swift`.
 ///
 /// Mechanisms only: which simulator to pick, how many times to retry, and whether a recovered
 /// device may be reused are the caller's decisions.
 public struct SimulatorManager: Sendable {
-    private let shell: ShellContext
-    private let logger = Logger.forType(SimulatorManager.self)
+    let shell: ShellContext
+    let logger = Logger.forType(SimulatorManager.self)
 
     public init(shell: ShellContext = .init()) {
         self.shell = shell
