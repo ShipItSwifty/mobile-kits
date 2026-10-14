@@ -32,15 +32,20 @@ track `main` (`branch: "main"`); bare SemVer tags still mark releases.
 ## Status
 
 - [x] `cli-wrappers`: 22 products, argv tests, Linux CI (Swift 6.2 and latest).
-- [x] ShipIt and Amoo build on `cli-wrappers`; Amoo no longer depends on ShipItSwifty.
-- [x] `mobile-kits`: all five products with tests.
-- [ ] ShipIt adopts `MobileCore` (`AppFramework`, `JSONValue`) and `MobileTesting` parsers; keeps reports.
-- [ ] ShipIt build, archive, export, and test actions delegate command assembly to `MobileBuild`/`MobileTesting`.
-- [ ] ShipIt device provisioning and simulator lease use `MobileDevices`.
-- [ ] Amoo leases move to `DeviceClaimStore`; runners delegate to `MobileDevices`.
-- [ ] Amoo `amoo init` harness discovery uses `MobileProject` (replacing regexes).
-- [ ] ShipIt DocC site and the website describe the new packages.
-- [ ] Create the GitHub repositories, push, drop local SwiftPM mirrors, re-resolve consumers (`remoteSourceControl`).
+- [x] `mobile-kits`: five products, tests on macOS and Linux.
+- [x] Amoo depends on `cli-wrappers` and `mobile-kits`, not ShipItSwifty.
+- [x] Amoo leases are `DeviceClaimStore` claims (same on-disk format); reads no longer reap.
+- [x] Amoo `amoo init` harness discovery uses `MobileProject`'s SwiftSyntax inspector.
+- [x] Amoo JDK resolution uses `JavaRuntimes`; devicectl, iproxy, avdmanager argv come from wrappers; `env up` boots through `SimulatorManager`.
+- [x] ShipIt depends on both; `BuildSystem` is `AppFramework`, `JSONValue` is MobileCore's.
+- [x] ShipIt reads native results through `MobileTesting` and Gradle JUnit/NO-SOURCE through `GradleTestResults`; keeps reports, reconciliation, evidence, coverage.
+- [x] ShipIt `SimulatorLease` is policy over `DeviceClaimStore`; `JSScriptRunner` runs on `JavaScriptProject`.
+- [x] ShipIt docs, DocC, and the website describe the packages.
+- [ ] ShipIt build, archive, export, and native-test actions call `XcodeBuilder`/`GradleBuilder`/`XcodeTestRunner` instead of assembling commands.
+- [ ] ShipIt `AndroidDeviceProvisioner` boots through `AndroidEmulatorManager` (needs an attached-process start mode).
+- [ ] Amoo `SimctlRunner`/`ADBRunner`/`EmulatorRunner` delegate to the MobileDevices managers; remaining raw `simctl` calls behind Amoo's process-runner seam move too.
+- [ ] Device-level verification (simulator, emulator, physical device) of the migrated paths.
+- [ ] Create the GitHub repositories, push, drop local SwiftPM mirrors, and re-resolve consumers so `Package.resolved` records `remoteSourceControl`.
 
 ## Rules
 
