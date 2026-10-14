@@ -54,14 +54,11 @@ public struct AndroidDevice: Codable, Sendable, Hashable, Identifiable {
 /// Inventory, boot waits, app management, and recovery for Android devices through `adb`.
 public struct AndroidDeviceManager: Sendable {
     private let shell: ShellContext
-    private let poll: @Sendable (Duration) -> Poller
+    private let poll: (@Sendable (Duration) -> Poller)?
     private let logger = Logger.forType(AndroidDeviceManager.self)
 
-    /// - Parameter poll: Builds the poller boot waits use; injected in tests.
-    public init(
-        shell: ShellContext = .init(),
-        poll: @escaping @Sendable (Duration) -> Poller = { Poller(timeout: $0, interval: .seconds(2)) }
-    ) {
+    /// - Parameter poll: Builds the poller boot waits use; `nil` polls every 2 seconds. Injected in tests.
+    public init(shell: ShellContext = .init(), poll: (@Sendable (Duration) -> Poller)? = nil) {
         self.shell = shell
         self.poll = poll
     }
@@ -115,11 +112,12 @@ public struct AndroidDeviceManager: Sendable {
     public func waitForBoot(
         _ serial: String,
         timeout: Duration = .seconds(300),
-        stop: @escaping @Sendable () async -> Error? = { nil }
+        stop: (@Sendable () async -> Error?)? = nil
     ) async throws {
         logger.info("Waiting for Android boot", metadata: ["serial": "\(serial)"])
         let adb = adb(serial)
-        _ = try await poll(timeout).until("boot of \(serial)", stop: stop) { () -> Bool? in
+        let poller = poll?(timeout) ?? Poller(timeout: timeout, interval: .seconds(2))
+        _ = try await poller.until("boot of \(serial)", stop: stop) { () -> Bool? in
             guard let output = try? await ToolRunner.capture(adb.getprop("sys.boot_completed"), timeout: .seconds(10)),
                 output.exitCode == 0, output.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
             else { return nil }

@@ -4,13 +4,16 @@ import Foundation
 public struct Poller: Sendable {
     public var timeout: Duration
     public var interval: Duration
-    private let sleep: @Sendable (Duration) async throws -> Void
+    private let sleep: (@Sendable (Duration) async throws -> Void)?
 
-    /// - Parameter sleep: Injected in tests; defaults to `Task.sleep(for:)`, so cancellation stops a poll.
+    /// - Parameter sleep: Injected in tests; `nil` uses `Task.sleep(for:)`, so cancellation stops a poll.
+    ///
+    /// Closure parameters are optional rather than defaulted: with Swift 6.3, a defaulted async
+    /// closure argument of a public initializer aborts when invoked from another module.
     public init(
         timeout: Duration,
         interval: Duration = .seconds(1),
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil
     ) {
         self.timeout = timeout
         self.interval = interval
@@ -27,14 +30,14 @@ public struct Poller: Sendable {
     ///   error `stop` returned.
     public func until<Value: Sendable>(
         _ operation: String,
-        stop: @Sendable () async -> Error? = { nil },
+        stop: (@Sendable () async -> Error?)? = nil,
         check: @Sendable () async throws -> Value?
     ) async throws -> Value {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         while true {
             try Task.checkCancellation()
-            if let error = await stop() { throw error }
+            if let stop, let error = await stop() { throw error }
             if let value = try await check() { return value }
             guard clock.now.advanced(by: interval) < deadline else {
                 let components = timeout.components
@@ -43,7 +46,11 @@ public struct Poller: Sendable {
                     seconds: Double(components.seconds) + Double(components.attoseconds) / 1e18
                 )
             }
-            try await sleep(interval)
+            if let sleep {
+                try await sleep(interval)
+            } else {
+                try await Task.sleep(for: interval)
+            }
         }
     }
 }

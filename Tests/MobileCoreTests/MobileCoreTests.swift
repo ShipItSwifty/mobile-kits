@@ -7,19 +7,40 @@ import Testing
 
 @Suite("MobileCore")
 struct MobileCoreTests {
-    @Test("Poller returns the first value and times out with the operation name")
-    func poller() async throws {
-        let attempts = Mutex(0)
-        let poller = Poller(timeout: .seconds(5), interval: .milliseconds(1), sleep: { _ in })
-        let value = try await poller.until("thing") { () -> Int? in
-            attempts.withLock { count in
+    /// A shared counter. Kept in a class: Swift 6.3 on macOS aborts when a non-escaping async
+    /// closure captures a noncopyable `Mutex` local directly.
+    final class Counter: Sendable {
+        private let value = Mutex(0)
+        func increment() -> Int {
+            value.withLock { count in
                 count += 1
-                return count == 3 ? 42 : nil
+                return count
             }
         }
+    }
+
+    @Test("Poller returns the first value a check produces")
+    func pollerReturnsValue() async throws {
+        let attempts = Counter()
+        let poller = Poller(timeout: .seconds(5), interval: .milliseconds(1), sleep: { _ in })
+        let value = try await poller.until("thing") { () -> Int? in
+            attempts.increment() == 3 ? 42 : nil
+        }
         #expect(value == 42)
+    }
+
+    @Test("Poller times out with the operation name")
+    func pollerTimesOut() async {
         await #expect(throws: MobileKitError.self) {
             _ = try await Poller(timeout: .milliseconds(20), interval: .milliseconds(5)).until("never") { () -> Int? in nil }
+        }
+    }
+
+    @Test("Poller stops early with the stop check's error")
+    func pollerStops() async {
+        await #expect(throws: MobileKitError.invalidRequest("stop")) {
+            _ = try await Poller(timeout: .seconds(5), interval: .milliseconds(1), sleep: { _ in })
+                .until("stopping", stop: { MobileKitError.invalidRequest("stop") }, check: { () -> Int? in nil })
         }
     }
 

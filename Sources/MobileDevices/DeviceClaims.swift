@@ -83,14 +83,14 @@ public struct DeviceClaimStore: Sendable {
     public let directory: URL
     public let ttl: TimeInterval
     /// Stops what an expired claim's holder left running, before the claim file is removed.
-    /// Only the consumer knows what that is; the default does nothing.
-    public let reaper: @Sendable (DeviceClaim) -> Void
+    /// Only the consumer knows what that is; `nil` leaves nothing to stop.
+    public let reaper: (@Sendable (DeviceClaim) -> Void)?
     private let logger = Logger.forType(DeviceClaimStore.self)
 
     public init(
         directory: URL,
         ttl: TimeInterval = Self.defaultTTL,
-        reaper: @escaping @Sendable (DeviceClaim) -> Void = { _ in }
+        reaper: (@Sendable (DeviceClaim) -> Void)? = nil
     ) {
         self.directory = directory
         self.ttl = ttl
@@ -199,7 +199,7 @@ public struct DeviceClaimStore: Sendable {
         let url = fileURL(deviceID: deviceID)
         guard let claim = read(url), claim.isExpired(at: now) else { return nil }
         logger.info("Reaping expired claim", metadata: ["device": "\(deviceID)", "claim": "\(claim.id)"])
-        reaper(claim)
+        reaper?(claim)
         try? FileManager.default.removeItem(at: url)
         return claim
     }
