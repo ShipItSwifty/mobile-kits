@@ -87,6 +87,7 @@ func artifactKind(for path: String) -> BuildArtifact.Kind? {
     case "framework": .framework
     case "xcframework": .xcframework
     case "xctestrun": .xctestrun
+    case "xctestproducts": .xctestproducts
     case "jsbundle", "bundle": .jsBundle
     default: nil
     }

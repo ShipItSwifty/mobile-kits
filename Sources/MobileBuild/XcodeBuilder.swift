@@ -198,6 +198,25 @@ public struct XcodeBuilder: Sendable {
             diagnostics: products.diagnostics + (testRuns.isEmpty ? ["build-for-testing wrote no .xctestrun file"] : []))
     }
 
+    /// `xcodebuild build-for-testing -testProductsPath <path>`: builds the app and test bundles once
+    /// into one `.xctestproducts` bundle that ``XcodeTestRunner`` runs any number of times, on any
+    /// destination of the same platform, without the project.
+    ///
+    /// Unlike ``buildForTesting(_:)`` this reads no build settings: the test-products bundle is the
+    /// only product, and `testProductsPath` must not exist yet.
+    public func buildForTesting(_ request: XcodeBuildRequest, testProductsPath: String) async throws -> BuildOutcome {
+        logger.info("xcodebuild build-for-testing", metadata: ["scheme": "\(request.scheme)", "products": "\(testProductsPath)"])
+        var resolved = request
+        resolved.additionalOptions.append(.testProductsPath(testProductsPath))
+        let (log, duration) = try await runBuild(command(for: resolved).buildForTesting(), backend: .xcodebuild) {
+            XcodeBuildLogSummary.parse($0).resultLine
+        }
+        let written = FileManager.default.fileExists(atPath: testProductsPath)
+        return outcome(
+            log, duration: duration, artifacts: written ? [BuildArtifact(kind: .xctestproducts, path: testProductsPath)] : [],
+            diagnostics: written ? [] : ["build-for-testing wrote no .xctestproducts bundle to \(testProductsPath)"])
+    }
+
     /// `xcodebuild archive -archivePath <path>`.
     public func archive(_ request: XcodeBuildRequest, archivePath: String) async throws -> BuildOutcome {
         logger.info("xcodebuild archive", metadata: ["scheme": "\(request.scheme)", "archive": "\(archivePath)"])
@@ -213,15 +232,24 @@ public struct XcodeBuilder: Sendable {
     }
 
     /// `xcodebuild -exportArchive`, writing `options` to a temporary plist.
-    public func exportArchive(archivePath: String, exportPath: String, options: ExportOptions) async throws -> BuildOutcome {
+    ///
+    /// - Parameter additionalOptions: Passed through unchanged, e.g. `-allowProvisioningUpdates` and
+    ///   App Store Connect authentication-key options for automatic signing.
+    public func exportArchive(
+        archivePath: String,
+        exportPath: String,
+        options: ExportOptions,
+        additionalOptions: [XcodeBuildOption] = []
+    ) async throws -> BuildOutcome {
         logger.info("xcodebuild -exportArchive", metadata: ["archive": "\(archivePath)", "method": "\(options.method)"])
         let plist = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ExportOptions-\(UUID().uuidString).plist")
         try options.plistData().write(to: plist)
         defer { try? FileManager.default.removeItem(at: plist) }
-        let family = XcodeBuild(context: shell)
+        var xcodebuild = XcodeBuild(context: shell)
             .settingStdoutDestination(output.stdout)
             .settingStderrDestination(output.stderr)
-            .exportArchive(archivePath: archivePath, exportPath: exportPath, exportOptionsPlist: plist.path)
+        for option in additionalOptions { xcodebuild = xcodebuild.option(option) }
+        let family = xcodebuild.exportArchive(archivePath: archivePath, exportPath: exportPath, exportOptionsPlist: plist.path)
         let (log, duration) = try await runBuild(family, backend: .xcodebuild) { XcodeBuildLogSummary.parse($0).resultLine }
         let ipas = ((try? FileManager.default.contentsOfDirectory(atPath: exportPath)) ?? []).sorted().filter { $0.hasSuffix(".ipa") }
         return outcome(

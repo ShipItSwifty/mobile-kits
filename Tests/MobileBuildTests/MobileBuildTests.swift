@@ -67,6 +67,45 @@ struct XcodeBuilderTests {
     }
 }
 
+@Suite("XcodeBuilder test products and export")
+struct XcodeBuilderTestProductsTests {
+    @Test("build-for-testing writes one .xctestproducts bundle and reads no build settings")
+    func buildForTestingTestProducts() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let products = scratch.url.appendingPathComponent("App.xctestproducts").path
+        let seen = Mutex([[String]]())
+        let executor = MockExecutor { command, _ in
+            seen.withLock { $0.append(command.arguments) }
+            try FileManager.default.createDirectory(atPath: products, withIntermediateDirectories: true)
+            return ShellOutput(stdout: "** TEST BUILD SUCCEEDED **\n", stderr: "", exitCode: 0)
+        }
+        let outcome = try await XcodeBuilder(shell: ShellContext(executor: executor))
+            .buildForTesting(XcodeBuildRequest(scheme: "App"), testProductsPath: products)
+
+        let calls = seen.withLock { $0 }
+        #expect(calls.count == 1, "No -showBuildSettings run")
+        #expect(calls[0].contains("build-for-testing"))
+        #expect(zip(calls[0], calls[0].dropFirst()).contains { $0 == "-testProductsPath" && $1 == products })
+        #expect(outcome.artifacts == [BuildArtifact(kind: .xctestproducts, path: products)])
+    }
+
+    @Test("export passes additional options such as -allowProvisioningUpdates")
+    func exportAdditionalOptions() async throws {
+        let seen = Mutex([String]())
+        let executor = MockExecutor { command, _ in
+            seen.withLock { $0 = command.arguments }
+            return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+        _ = try await XcodeBuilder(shell: ShellContext(executor: executor))
+            .exportArchive(
+                archivePath: "/tmp/A.xcarchive", exportPath: "/tmp/does-not-exist-export", options: ExportOptions(method: "app-store"),
+                additionalOptions: [.allowProvisioningUpdates])
+        #expect(seen.withLock { $0 }.contains("-allowProvisioningUpdates"))
+        #expect(seen.withLock { $0 }.contains("-exportArchive"))
+    }
+}
+
 @Suite("GradleBuilder")
 struct GradleBuilderTests {
     @Test("APKs come from output-metadata.json; bundles from build/outputs/bundle")

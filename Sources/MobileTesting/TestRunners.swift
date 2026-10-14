@@ -121,10 +121,37 @@ public struct XcodeTestRunner: Sendable {
         additionalOptions: [XcodeBuildOption] = []
     ) async throws -> TestExecution {
         logger.info("xcodebuild test-without-building", metadata: ["xctestrun": "\(xctestrun)", "bundle": "\(resultBundlePath)"])
+        return try await testWithoutBuilding(
+            input: .xctestrun(xctestrun), destination: destination, selection: selection, resultBundlePath: resultBundlePath,
+            additionalOptions: additionalOptions)
+    }
+
+    /// `xcodebuild test-without-building -testProductsPath <bundle>`, reusing the `.xctestproducts`
+    /// bundle ``XcodeBuilder/buildForTesting(_:testProductsPath:)`` wrote.
+    public func testWithoutBuilding(
+        testProducts: String,
+        destination: XcodeDestination,
+        selection: XcodeTestSelection = .init(),
+        resultBundlePath: String,
+        additionalOptions: [XcodeBuildOption] = []
+    ) async throws -> TestExecution {
+        logger.info("xcodebuild test-without-building", metadata: ["products": "\(testProducts)", "bundle": "\(resultBundlePath)"])
+        return try await testWithoutBuilding(
+            input: .testProductsPath(testProducts), destination: destination, selection: selection, resultBundlePath: resultBundlePath,
+            additionalOptions: additionalOptions)
+    }
+
+    private func testWithoutBuilding(
+        input: XcodeBuildOption,
+        destination: XcodeDestination,
+        selection: XcodeTestSelection,
+        resultBundlePath: String,
+        additionalOptions: [XcodeBuildOption]
+    ) async throws -> TestExecution {
         var xcodebuild = XcodeBuild(context: shell)
             .settingStdoutDestination(output.stdout)
             .settingStderrDestination(output.stderr)
-            .option(.xctestrun(xctestrun))
+            .option(input)
             .option(.destination(destination.specifier))
             .option(.resultBundlePath(resultBundlePath))
         for option in selection.options + additionalOptions { xcodebuild = xcodebuild.option(option) }
@@ -139,7 +166,24 @@ public struct XcodeTestRunner: Sendable {
                 reason: XcodeBuildLogSummary.parse(log.stdout).resultLine ?? "xcodebuild wrote no result bundle")
         }
         #if os(macOS)
-        let parsed = try await IOSXCResultTestParser(shell: shell).parse(xcresultPath: resultBundlePath)
+        // xcresulttool can fail on a bundle xcodebuild has only just finished writing; give it a moment.
+        var parsed: ParsedTestRun?
+        var readError: Error?
+        for attempt in 1...3 {
+            do {
+                parsed = try await IOSXCResultTestParser(shell: shell).parse(xcresultPath: resultBundlePath)
+                break
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw error }
+                readError = error
+                if attempt < 3 { try await Task.sleep(for: .milliseconds(250 * attempt)) }
+            }
+        }
+        guard let parsed else {
+            throw TestExecutionFailure(
+                command: argv, exitCode: log.exitCode, output: log,
+                reason: "Could not read the result bundle: \(readError.map { String(describing: $0) } ?? "unknown error")")
+        }
         guard parsed.hasResults else {
             throw TestExecutionFailure(
                 command: argv, exitCode: log.exitCode, output: log, reason: "The result bundle holds no test outcomes")

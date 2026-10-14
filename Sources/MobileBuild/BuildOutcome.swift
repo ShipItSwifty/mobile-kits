@@ -11,6 +11,8 @@ public struct BuildArtifact: Codable, Sendable, Hashable {
         case xcarchive
         case dsym
         case xctestrun
+        /// An `.xctestproducts` bundle from `build-for-testing -testProductsPath`.
+        case xctestproducts
         case framework
         case xcframework
         case apk

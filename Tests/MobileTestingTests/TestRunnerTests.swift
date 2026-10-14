@@ -20,6 +20,27 @@ struct TestRunnerTests {
         </testsuite>
         """
 
+    @Test("test-without-building reuses an .xctestproducts bundle and reports a missing result bundle with the argv")
+    func xcodeTestProducts() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let executor = MockExecutor { _, _ in ShellOutput(stdout: "", stderr: "Failed to clone device", exitCode: 65) }
+        let runner = XcodeTestRunner(shell: ShellContext(executor: executor))
+        do {
+            _ = try await runner.testWithoutBuilding(
+                testProducts: "/tmp/App.xctestproducts", destination: .simulator(udid: "UDID"),
+                selection: XcodeTestSelection(testPlan: "Unit"), resultBundlePath: scratch.url.appendingPathComponent("r.xcresult").path)
+            Issue.record("A run with no result bundle is a failure")
+        } catch let failure as TestExecutionFailure {
+            #expect(failure.exitCode == 65)
+            #expect(failure.output.stderr.contains("Failed to clone"))
+            let pairs = Array(zip(failure.command, failure.command.dropFirst()))
+            #expect(pairs.contains { $0 == "-testProductsPath" && $1 == "/tmp/App.xctestproducts" })
+            #expect(failure.command.contains("test-without-building"))
+            #expect(failure.command.contains("Unit"))
+        }
+    }
+
     @Test("Gradle results come from the task's JUnit XML; failures are a result, not an error")
     func gradleReadsJUnit() async throws {
         let scratch = try TemporaryDirectory()

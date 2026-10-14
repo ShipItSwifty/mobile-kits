@@ -77,3 +77,36 @@ struct AndroidDeviceManagerTests {
         #expect(recorded[1].prefix(2) == ["-s", "S"])
     }
 }
+
+@Suite("AndroidEmulatorManager attached start")
+struct AndroidEmulatorAttachedTests {
+    @Test("An attached emulator is spawned as a child, keeps its process handle, and stops through it")
+    func attachedStartAndStop() async throws {
+        let seen = Mutex([[String]]())
+        let executor = MockExecutor { command, _ in
+            seen.withLock { $0.append(command.arguments) }
+            return ShellOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+        let manager = AndroidEmulatorManager(shell: ShellContext(executor: executor))
+
+        let instance = try await manager.start(avd: "Pixel_7", options: EmulatorBootOptions(headless: true, port: 5560, attached: true))
+
+        #expect(instance.serial == "emulator-5560")
+        #expect(instance.process != nil)
+        #expect(instance.logPath == nil)
+        let start = try #require(seen.withLock { $0 }.first)
+        #expect(start.contains("-avd") && start.contains("Pixel_7") && start.contains("-no-window"))
+
+        await manager.stop(instance)
+        #expect(seen.withLock { $0 }.contains { $0.contains("kill") }, "adb emu kill is sent before the child is torn down")
+    }
+
+    @Test("A detached emulator has no process handle and logs to a file")
+    func detachedStart() async throws {
+        let executor = MockExecutor { _, _ in ShellOutput(stdout: "", stderr: "", exitCode: 0) }
+        let manager = AndroidEmulatorManager(shell: ShellContext(executor: executor))
+        let instance = try await manager.start(avd: "Pixel_7", options: EmulatorBootOptions(port: 5562))
+        #expect(instance.process == nil)
+        #expect(instance.logPath != nil)
+    }
+}
