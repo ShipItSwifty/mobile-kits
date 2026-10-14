@@ -48,12 +48,16 @@ public struct JavaScriptProject: Sendable {
 
     /// The `scripts` entry named `name`, if `package.json` declares it.
     public func script(named name: String) -> String? {
+        declaredScripts()?[name] as? String
+    }
+
+    /// `package.json`'s `scripts`, or `nil` when the file is missing or unreadable.
+    func declaredScripts() -> [String: Any]? {
         let url = URL(fileURLWithPath: root).appendingPathComponent("package.json")
         guard let data = try? Data(contentsOf: url),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let scripts = json["scripts"] as? [String: Any]
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
-        return scripts[name] as? String
+        return json["scripts"] as? [String: Any] ?? [:]
     }
 
     /// Whether the script invokes Jest, so Jest's flags (`--json`, `--testNamePattern`) apply.
@@ -78,9 +82,9 @@ public struct JavaScriptProject: Sendable {
     /// - Throws: ``MobileKitError/notFound(_:)`` when `package.json` has no such script.
     public func run(script name: String, arguments: [String] = [], environment: [String: String] = [:]) async throws -> ShellOutput {
         try await installDependenciesIfNeeded()
-        if FileManager.default.fileExists(atPath: URL(fileURLWithPath: root).appendingPathComponent("package.json").path),
-            script(named: name) == nil
-        {
+        // Refuse only a readable package.json that lacks the script; an unreadable one is left to
+        // the package manager, whose error names the actual problem.
+        if let scripts = declaredScripts(), scripts[name] == nil {
             throw MobileKitError.notFound("No '\(name)' script in \(root)/package.json")
         }
         let command = Command(packageManager.rawValue)
