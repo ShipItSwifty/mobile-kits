@@ -143,10 +143,11 @@ extension AndroidDeviceManager {
     }
 
     /// Starts `adb shell screenrecord <remotePath>` in the background; the file stays on the device
-    /// (`adb pull` it after ``stopRecording(on:)``).
+    /// (`adb pull` it after ``stopRecording(on:timeout:)``). Waits up to `readinessTimeout` for
+    /// the encoder to open its output before returning, so an immediate stop can finalize it.
     ///
     /// - Throws: ``MobileKitError/invalidRequest(_:)`` when a recording is already active on `serial`.
-    public func startRecording(on serial: String, remotePath: String) async throws {
+    public func startRecording(on serial: String, remotePath: String, readinessTimeout: Duration = .seconds(20)) async throws {
         guard await recordings.reserve(serial: serial) else {
             logger.error("Recording already active", metadata: ["serial": "\(serial)"])
             throw MobileKitError.invalidRequest("A recording is already active for \(serial).")
@@ -155,7 +156,16 @@ extension AndroidDeviceManager {
         let command = adb(serial).screenrecord(remotePath: remotePath)
         let process: any SpawnedProcess
         do {
-            process = try await command.spawn(teardown: .interruptThenTerminate)
+            // Boot completion can precede emulated storage mounting on a cold device.
+            let parent = (remotePath as NSString).deletingLastPathComponent
+            _ = try await Poller(timeout: readinessTimeout, interval: .milliseconds(100)).until("recording storage readiness") {
+                let result = try await ToolRunner.capture(
+                    adb(serial).shell("test -d \(Self.shellQuoted(parent.isEmpty ? "." : parent))"), timeout: .seconds(5))
+                return result.exitCode == 0 ? true : nil
+            }
+            // A previous output must not make the readiness check succeed before this encoder starts.
+            try await ToolRunner.run(adb(serial).shell("rm -f \(Self.shellQuoted(remotePath))"), timeout: .seconds(10))
+            process = try await command.spawn(captureOutput: true, teardown: .interruptThenTerminate)
         } catch {
             await recordings.cancel(serial: serial)
             logger.error("Screen recording failed to start", metadata: ["serial": "\(serial)", "error": "\(error)"])
@@ -164,22 +174,51 @@ extension AndroidDeviceManager {
             }
             throw error
         }
+        do {
+            // A cold emulator can need seconds to initialize the encoder. SIGINT before that
+            // point kills it without producing a movie, so return only once it has opened output.
+            _ = try await Poller(timeout: readinessTimeout, interval: .milliseconds(100)).until("screen recording readiness") {
+                let result = try await ToolRunner.capture(
+                    adb(serial).shell("test -s \(Self.shellQuoted(remotePath))"), timeout: .seconds(5))
+                return result.exitCode == 0 ? true : nil
+            }
+        } catch {
+            logger.error("Screen recording did not become ready", metadata: ["serial": "\(serial)"])
+            await recordings.cancel(serial: serial)
+            _ = try? await ToolRunner.capture(adb(serial).shellPkill(process: "screenrecord"), timeout: .seconds(5))
+            let output = await RecordingProcess.waitForExit(process, timeout: .seconds(5))
+            if output.exitCode != 0 && output.exitCode != 130 {
+                throw MobileKitError.commandFailed(
+                    command: ["adb", "-s", serial, "shell", "screenrecord"], exitCode: output.exitCode,
+                    output: [output.stderr, output.stdout].filter { !$0.isEmpty }.joined(separator: "\n"))
+            }
+            throw error
+        }
         if await !recordings.attach(process, serial: serial) {
             // stopRecording ran while the process was starting.
-            try? await process.interrupt()
-            _ = await process.waitForExit()
+            _ = try? await ToolRunner.capture(adb(serial).shellPkill(process: "screenrecord"), timeout: .seconds(5))
+            _ = await RecordingProcess.waitForExit(process, timeout: .seconds(5))
         }
         logger.info("Started screen recording", metadata: ["serial": "\(serial)"])
     }
 
-    /// Stops the recording started by ``startRecording(on:remotePath:)``: SIGINT, then wait for
-    /// `screenrecord` to finalize the file. Falls back to `shell pkill -INT screenrecord` when no
-    /// recording is tracked (for example one started by another process).
-    public func stopRecording(on serial: String) async throws {
+    /// Stops the recording started by ``startRecording(on:remotePath:readinessTimeout:)``: SIGINT, then wait for
+    /// `screenrecord` to finalize the file. The signal is sent on the device with `pkill`, not
+    /// to the host adb client. A tracked client is awaited up to `timeout`, then torn down.
+    public func stopRecording(on serial: String, timeout: Duration = .seconds(20)) async throws {
         logger.info("Stopping screen recording", metadata: ["serial": "\(serial)"])
         if let process = await recordings.remove(serial: serial) {
-            try await process.interrupt()
-            _ = await process.waitForExit()
+            // Interrupt screenrecord on the device. Interrupting the host adb client instead
+            // disconnects its shell and can kill the encoder before it finalizes the MP4.
+            _ = try? await ToolRunner.capture(adb(serial).shellPkill(process: "screenrecord"), timeout: .seconds(30))
+            let output = await RecordingProcess.waitForExit(process, timeout: timeout)
+            // adb may report the remote SIGINT as 128 + SIGINT even after screenrecord finalized.
+            if output.exitCode != 0 && output.exitCode != 130 {
+                logger.error("Recorder failed", metadata: ["serial": "\(serial)", "exit": "\(output.exitCode)"])
+                throw MobileKitError.commandFailed(
+                    command: ["adb", "-s", serial, "shell", "screenrecord"], exitCode: output.exitCode,
+                    output: [output.stderr, output.stdout].filter { !$0.isEmpty }.joined(separator: "\n"))
+            }
             logger.info("Stopped screen recording", metadata: ["serial": "\(serial)"])
             return
         }

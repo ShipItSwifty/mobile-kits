@@ -59,8 +59,8 @@ public struct GradleBuilder: Sendable {
         return gradle
     }
 
-    /// Runs `tasks` and reports every APK, test APK, and bundle written under `modules`'
-    /// `build/outputs` during the run.
+    /// Runs `tasks` and reports their APKs, test APKs, and bundles, including cached outputs.
+    /// Variant tasks select matching metadata rather than unrelated outputs from earlier builds.
     ///
     /// - Parameter modules: Module directories relative to the project (`app`); every
     ///   first-level directory with `build/outputs` when empty.
@@ -74,7 +74,11 @@ public struct GradleBuilder: Sendable {
         let started = Date()
         let family = command(for: project).tasks((clean ? [.clean] : []) + tasks)
         let (log, duration) = try await runBuild(family, backend: .gradle) { GradleLogSummary.parse($0).resultLine }
-        let artifacts = Self.outputs(projectDirectory: project.directory, modules: modules, modifiedSince: started)
+        let directory = URL(
+            fileURLWithPath: project.directory,
+            relativeTo: URL(fileURLWithPath: shell.workingDirectory ?? FileManager.default.currentDirectoryPath, isDirectory: true)
+        ).standardizedFileURL.path
+        let artifacts = Self.outputs(projectDirectory: directory, modules: modules, modifiedSince: started, tasks: tasks)
         let summary = GradleLogSummary.parse(log.stdout)
         logger.info("Gradle build finished", metadata: ["result": "\(summary.resultLine ?? "")", "artifacts": "\(artifacts.count)"])
         return BuildOutcome(
@@ -116,7 +120,9 @@ public struct GradleBuilder: Sendable {
     // MARK: - Outputs
 
     /// APKs listed in `output-metadata.json` and `.aab` files under each module's `build/outputs`.
-    static func outputs(projectDirectory: String, modules: [String], modifiedSince date: Date) -> [BuildArtifact] {
+    static func outputs(
+        projectDirectory: String, modules: [String], modifiedSince date: Date, tasks: [GradleTask] = []
+    ) -> [BuildArtifact] {
         let fileManager = FileManager.default
         let root = URL(fileURLWithPath: projectDirectory)
         let moduleDirectories =
@@ -131,7 +137,9 @@ public struct GradleBuilder: Sendable {
             }
             for case let file as URL in files {
                 let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                guard (modified ?? .distantFuture) >= date.addingTimeInterval(-1) else { continue }
+                let selection = GradleOutputSelection(tasks: tasks, module: module.path, root: root.path)
+                let fresh = (modified ?? .distantFuture) >= date.addingTimeInterval(-1)
+                guard selection.includes(file, fresh: fresh) else { continue }
                 if file.lastPathComponent == "output-metadata.json" {
                     let isTest = file.path.contains("/androidTest/")
                     for apk in apkPaths(fromMetadata: file) {

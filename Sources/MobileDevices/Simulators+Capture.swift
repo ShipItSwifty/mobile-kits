@@ -38,7 +38,8 @@ extension SimulatorManager {
             return data
         } catch {
             logger.error("Screenshot file was not readable", metadata: ["udid": "\(udid)", "error": "\(error)"])
-            throw MobileKitError.unexpectedOutput(tool: "simctl io screenshot", detail: "no image was written: \(error.localizedDescription)")
+            throw MobileKitError.unexpectedOutput(
+                tool: "simctl io screenshot", detail: "no image was written: \(error.localizedDescription)")
         }
     }
 
@@ -79,11 +80,7 @@ extension SimulatorManager {
             } catch {
                 logger.error("Interrupting the recording failed", metadata: ["pid": "\(pid)", "error": "\(error)"])
             }
-            let exited = await Self.waitForExit(process, timeout: timeout)
-            if !exited {
-                logger.warning("Recording ignored SIGINT; tearing down", metadata: ["pid": "\(pid)"])
-                _ = await process.teardownAndWait()
-            }
+            _ = await RecordingProcess.waitForExit(process, timeout: timeout)
         } else {
             try await ToolRunner.run(
                 Command("kill", arguments: ["-INT", String(pid)]), context: shell)
@@ -96,21 +93,6 @@ extension SimulatorManager {
         await SimulatorRecordingRegistry.shared.contains(pid: pid)
     }
 
-    private static func waitForExit(_ process: any SpawnedProcess, timeout: Duration) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                _ = await process.waitForExit()
-                return true
-            }
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
-    }
 }
 
 /// Live `recordVideo` processes by pid, shared so any manager instance can stop one.

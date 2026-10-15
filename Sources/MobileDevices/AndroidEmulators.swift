@@ -242,7 +242,12 @@ public struct AndroidEmulatorManager: Sendable {
             return (serial, nil)
         }
         let instance = try await start(avd: avd, options: options)
-        try await waitUntilBooted(instance, timeout: timeout)
+        do {
+            try await waitUntilBooted(instance, timeout: timeout)
+        } catch {
+            await stop(instance)
+            throw error
+        }
         return (instance.serial, instance)
     }
 
@@ -281,7 +286,12 @@ public struct AndroidEmulatorManager: Sendable {
         coldBoot.port = instance.emulatorPort
         coldBoot.attached = instance.process != nil
         let restarted = try await start(avd: instance.avd, options: coldBoot, logPath: instance.logPath)
-        try await waitUntilBooted(restarted, timeout: timeout)
+        do {
+            try await waitUntilBooted(restarted, timeout: timeout)
+        } catch {
+            await stop(restarted)
+            throw error
+        }
         return restarted
     }
 

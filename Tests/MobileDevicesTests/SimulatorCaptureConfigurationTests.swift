@@ -58,7 +58,8 @@ struct SimulatorConfigurationTests {
         let simulators = manager(log: log)
         try await simulators.setAppearance(.dark, on: "U")
         try await simulators.openURL("myapp://home?x=1", on: "U")
-        #expect(log.all == [["xcrun", "simctl", "ui", "U", "appearance", "dark"], ["xcrun", "simctl", "openurl", "U", "myapp://home?x=1"]])
+        #expect(
+            log.all == [["xcrun", "simctl", "ui", "U", "appearance", "dark"], ["xcrun", "simctl", "openurl", "U", "myapp://home?x=1"]])
     }
 
     @Test("A failing simctl call surfaces as a command failure")

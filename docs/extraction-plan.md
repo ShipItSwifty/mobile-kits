@@ -43,9 +43,10 @@ track `main` (`branch: "main"`); bare SemVer tags still mark releases.
 - [x] ShipIt docs, DocC, and the website describe the packages.
 - [x] ShipIt build, archive, export, and native-test actions call `XcodeBuilder`/`GradleBuilder`/`XcodeTestRunner` instead of assembling commands (Flutter and React Native keep their `cli-wrappers` families; Gradle test execution and evidence stay ShipIt policy).
 - [x] ShipIt `AndroidDeviceProvisioner` boots through `AndroidEmulatorManager` (`EmulatorBootOptions.attached`).
-- [ ] Amoo `SimctlRunner`/`ADBRunner`/`EmulatorRunner` delegate to the MobileDevices managers; remaining raw `simctl` calls behind Amoo's process-runner seam move too.
-- [ ] Device-level verification (simulator, emulator, physical device) of the migrated paths.
-- [ ] Create the GitHub repositories, push, drop local SwiftPM mirrors, and re-resolve consumers so `Package.resolved` records `remoteSourceControl`.
+- [x] Amoo `SimctlRunner`/`ADBRunner`/`EmulatorRunner` delegate to the MobileDevices managers; remaining raw `simctl` calls behind Amoo's process-runner seam move too.
+- [x] Simulator and emulator smoke verification: discovery, boot/reuse, claims, launch, visibility, screenshots, finalized simulator/Android MP4 recordings, and cleanup.
+- [ ] Physical-device verification of the migrated paths (no connected hardware available).
+- [x] Create the GitHub repositories and resolve consumer dependencies from GitHub (`remoteSourceControl`). Local SwiftPM edits may be used while validating unpublished changes.
 
 ## Rules
 

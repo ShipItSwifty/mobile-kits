@@ -247,20 +247,26 @@ struct AndroidDeviceOperationsTests {
 
     // MARK: - Recording
 
-    @Test("Recording spawns screenrecord, refuses a duplicate, and stop interrupts the tracked process")
+    @Test("Recording spawns screenrecord, refuses a duplicate, and stop signals the on-device encoder")
     func recordingLifecycle() async throws {
         let executor = MockExecutor(exitCode: 0)
         let registry = AndroidRecordingRegistry()
         let manager = manager(executor, recordings: registry)
 
         try await manager.startRecording(on: "S", remotePath: "/sdcard/a.mp4")
-        #expect(recordedArguments(executor) == [["-s", "S", "shell", "screenrecord", "/sdcard/a.mp4"]])
+        #expect(
+            recordedArguments(executor) == [
+                ["-s", "S", "shell", "test -d /sdcard"],
+                ["-s", "S", "shell", "rm -f /sdcard/a.mp4"],
+                ["-s", "S", "shell", "screenrecord", "/sdcard/a.mp4"],
+                ["-s", "S", "shell", "test -s /sdcard/a.mp4"],
+            ])
         #expect(await manager.isRecording(on: "S"))
 
         await #expect(throws: MobileKitError.invalidRequest("A recording is already active for S.")) {
             try await manager.startRecording(on: "S", remotePath: "/sdcard/b.mp4")
         }
-        #expect(executor.recordedCommands.count == 1)
+        #expect(executor.recordedCommands.count == 4)
 
         // A different device is independent.
         try await manager.startRecording(on: "T", remotePath: "/sdcard/c.mp4")
@@ -268,8 +274,8 @@ struct AndroidDeviceOperationsTests {
         try await manager.stopRecording(on: "S")
         #expect(!(await manager.isRecording(on: "S")))
         #expect(await manager.isRecording(on: "T"))
-        // Tracked stop interrupts the process; it never shells out to pkill.
-        #expect(!recordedArguments(executor).contains { $0.contains("pkill") })
+        // Signal the device encoder so it finalizes its MP4 before the adb client exits.
+        #expect(recordedArguments(executor).contains(["-s", "S", "shell", "pkill", "-INT", "screenrecord"]))
 
         // After the stop a new recording is allowed again.
         try await manager.startRecording(on: "S", remotePath: "/sdcard/d.mp4")
