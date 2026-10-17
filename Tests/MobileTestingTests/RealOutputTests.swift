@@ -77,6 +77,27 @@ struct RealFormatTests {
         #expect(run.testCases.allSatisfy { $0.destinationID == destination.id })
     }
 
+    @Test("A real failing test takes its file and line from the Failure Message child")
+    func realFailureLocations() async throws {
+        let run = try await parse("xcresult-failure-locations")
+        func test(_ name: String) throws -> ParsedTestCase { try #require(run.testCases.first { $0.name == name }) }
+
+        let flaky = try test("testFlaky()")
+        #expect(flaky.status == .failed)
+        #expect(flaky.message == "failed - fails on the first attempt only (en)")
+        #expect(flaky.file == "/project/ios-sampleTests/SmokeTests.swift")
+        #expect(flaky.line == 42)
+
+        let alwaysFails = try test("testAlwaysFailsWhenAsked()")
+        #expect(alwaysFails.message?.contains("asked to fail") == true)
+        #expect(alwaysFails.file == "/project/ios-sampleTests/SmokeTests.swift")
+        #expect(alwaysFails.line == 46)
+
+        let passes = try test("testPasses()")
+        #expect(passes.file == nil)
+        #expect(passes.line == nil)
+    }
+
     @Test("A real simulator clone failure is one failed pseudo-test carrying the clone message")
     func realCloneFailure() async throws {
         let run = try await parse("xcresult-clone-failure")

@@ -11,5 +11,6 @@ what the tools actually write, not against hand-written approximations.
 | `swift-testing-events/nested-suites.jsonl` | `swift test --event-stream-output-path` (Swift 6.4) on a package with a two-level nested suite (`Outer/Inner`: pass, two failures), a top-level test and a parameterized test with one failing argument. Test IDs carry the full suite path plus a trailing `File.swift:line:column`. |
 | `xcresult-clone-failure/` | `xcresulttool get test-results tests/summary --compact` plus the `xcodebuild` log from a run that hit `Failed to clone device named 'iPhone 17'` (exit 65). |
 | `xcresult-recovered/` | The same project's serial retry, which passed. Devices include `"platform": "iOS Simulator"`. |
+| `xcresult-failure-locations/` | `xcresulttool get test-results tests/summary --compact` from a unit-test run on an iPhone 17e simulator (iOS 27.0): `testPasses`, `testFlaky` (fails at `SmokeTests.swift:42`) and `testAlwaysFailsWhenAsked` (`:46`). The failing `Test Case` nodes carry no location; each has a `Failure Message` child with `sourceLocation` (`filePath`, `lineNumber`). Project path scrubbed to `/project/`. |
 
 Local paths are scrubbed. To refresh one, re-run the tool and replace the file; the tests state what they expect.

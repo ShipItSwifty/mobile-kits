@@ -195,6 +195,8 @@ private struct XCResultTestExtractor: Sendable {
                 if identifier.split(separator: "/").count < 3, let target = node.string(for: "_testTarget") { return target + "/" + value }
                 return value
             }
+            // The first failure child supplies both the message and, when the node has none, the location.
+            let failureMessage = children.lazy.compactMap { $0.objectValue }.first { $0.string(for: "nodeType") == "Failure Message" }
             let dimensions = [node.string(for: "_configuration"), node.string(for: "_device")].compactMap { $0 }
             let stableID = "xcresult-case:\(identifier)" + (dimensions.isEmpty ? "" : ":" + dimensions.joined(separator: ":"))
 
@@ -206,12 +208,12 @@ private struct XCResultTestExtractor: Sendable {
                 durationSeconds: node.double(for: "durationInSeconds") ?? node.double(for: "duration")
                     ?? node.double(for: "durationSeconds"),
                 message: node.string(for: "failureText") ?? node.string(for: "summary") ?? node.string(for: "message")
-                    ?? children.compactMap { child in
-                        child.objectValue?.string(for: "nodeType") == "Failure Message" ? child.objectValue?.string(for: "name") : nil
-                    }.first,
-                file: node.string(for: "sourceFileName") ?? node.object(for: "sourceLocation")?.string(for: "filePath"),
+                    ?? failureMessage?.string(for: "name"),
+                file: node.string(for: "sourceFileName") ?? node.object(for: "sourceLocation")?.string(for: "filePath")
+                    ?? failureMessage?.object(for: "sourceLocation")?.string(for: "filePath"),
                 line: node.int(for: "sourceLineNumber") ?? node.int(for: "lineNumber")
-                    ?? node.object(for: "sourceLocation")?.int(for: "lineNumber"),
+                    ?? node.object(for: "sourceLocation")?.int(for: "lineNumber")
+                    ?? failureMessage?.object(for: "sourceLocation")?.int(for: "lineNumber"),
                 rerunSelector: selector.map(TestRerunSelector.xcodeOnlyTesting),
                 metadata: [
                     "configuration": node.string(for: "_configuration"), "device": node.string(for: "_device"),
