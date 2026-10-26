@@ -72,7 +72,8 @@ let package = Package(
         .testTarget(name: "MobileCoreTests", dependencies: ["MobileCore", swiftyShell]),
         .testTarget(
             name: "MobileDevicesTests",
-            dependencies: ["MobileDevices", swiftyShell, .product(name: "TestCommons", package: "SwiftTestCommons")]
+            dependencies: ["MobileDevices", swiftyShell, .product(name: "TestCommons", package: "SwiftTestCommons")],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "MobileBuildTests",

@@ -1,0 +1,21 @@
+{
+  "error": {
+    "code": 24004,
+    "domain": "com.apple.dt.CoreDeviceError",
+    "userInfo": {
+      "NSLocalizedDescription": {
+        "string": "Failed to query resizable app session state."
+      },
+      "NSLocalizedFailureReason": {
+        "string": "The specified display is not currently hosting a resizable app session."
+      }
+    }
+  },
+  "errorSignature": "(com.apple.dt.CoreDeviceError 24004)",
+  "info": {
+    "commandType": "devicectl.device.info.appResize",
+    "jsonVersion": 5,
+    "outcome": "failed",
+    "version": "651.31"
+  }
+}

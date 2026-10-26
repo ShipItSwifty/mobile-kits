@@ -1,0 +1,29 @@
+{
+  "info": {
+    "commandType": "devicectl.device.pasteboard.info",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "changeCount": 162,
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "items": [
+      {
+        "flavors": [
+          {
+            "type": "com.apple.iWork.TSPNativeData"
+          },
+          {
+            "type": "com.apple.iWork.TSPNativeMetadata"
+          },
+          {
+            "type": "com.apple.iWork.TSPDescription"
+          }
+        ],
+        "index": 0
+      }
+    ],
+    "pasteboardName": "general"
+  }
+}

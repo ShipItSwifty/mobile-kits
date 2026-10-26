@@ -1,0 +1,51 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.displays",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "backlightState": "activeOn",
+    "displays": [
+      {
+        "backlightState": "activeOn",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            1320,
+            2868
+          ]
+        ],
+        "chromeIdentifier": "com.apple.dt.devicekit.chrome.phone12",
+        "currentOrientation": "rot0",
+        "displayId": 1,
+        "framebufferMaskIdentifier": "EB31C0E2-52E0-430E-B4DA-4242D2881AFF",
+        "name": "LCD",
+        "nativeOrientation": "rot0",
+        "nativeSize": [
+          1320,
+          2868
+        ],
+        "physicalSize": [
+          2.86956524848938,
+          6.234782695770264
+        ],
+        "pointScale": 3,
+        "primary": true,
+        "type": {
+          "integrated": {}
+        },
+        "uniqueId": "965BC76B-3694-4358-91DA-5C23AE187A3E"
+      }
+    ],
+    "orientation": {
+      "currentDeviceNonFlatOrientation": "portrait",
+      "currentDeviceOrientation": "unknown",
+      "currentDeviceOrientationLocked": false
+    }
+  }
+}

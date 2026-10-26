@@ -1,0 +1,45 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.apps",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "apps": [
+      {
+        "appClip": false,
+        "builtByDeveloper": true,
+        "bundleIdentifier": "com.amoo.companion",
+        "bundleVersion": "1",
+        "containerAccessible": true,
+        "defaultApp": false,
+        "hidden": false,
+        "internalApp": false,
+        "name": "AmooCompanion",
+        "removable": true,
+        "url": "file:///Users/dev/Library/Developer/CoreSimulator/Devices/11111111-2222-3333-4444-555555555555/data/Containers/Bundle/Application/3C4EA317-E9AA-4DF5-9338-A0BC7C4F0431/AmooCompanion.app/",
+        "version": "1.0"
+      },
+      {
+        "appClip": false,
+        "builtByDeveloper": true,
+        "bundleIdentifier": "com.amoo.companion.uitests.xctrunner",
+        "bundleVersion": "1",
+        "containerAccessible": true,
+        "defaultApp": false,
+        "hidden": false,
+        "internalApp": false,
+        "name": "AmooCompanionUITests-Runner",
+        "removable": true,
+        "url": "file:///Users/dev/Library/Developer/CoreSimulator/Devices/11111111-2222-3333-4444-555555555555/data/Containers/Bundle/Application/B7A990F6-2B14-4B3B-8998-8F3BC96CE83C/AmooCompanionUITests-Runner.app/",
+        "version": "1.0"
+      }
+    ],
+    "defaultAppsIncluded": false,
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "hiddenAppsIncluded": false,
+    "internalAppsIncluded": false,
+    "removableAppsIncluded": true
+  }
+}

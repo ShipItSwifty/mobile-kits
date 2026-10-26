@@ -21,6 +21,8 @@ public enum MobileKitError: Error, Equatable, Sendable, LocalizedError {
     case processExited(description: String, exitCode: Int32?, logTail: String)
     /// An invariant or input was invalid.
     case invalidRequest(String)
+    /// CoreDevice rejected a `devicectl` operation and said why.
+    case coreDeviceFailed(CoreDeviceFailure)
 
     public var errorDescription: String? {
         switch self {
@@ -42,6 +44,9 @@ public enum MobileKitError: Error, Equatable, Sendable, LocalizedError {
             "\(description) exited\(exitCode.map { " with status \($0)" } ?? "")\(logTail.isEmpty ? "" : ":\n\(logTail)")"
         case .invalidRequest(let detail):
             detail
+        case .coreDeviceFailed(let failure):
+            [failure.message, failure.reason].compactMap { $0 }.joined(separator: " ")
+                + " (\(failure.domain) \(failure.code))"
         }
     }
 }

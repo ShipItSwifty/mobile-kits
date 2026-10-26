@@ -1,0 +1,16 @@
+{
+  "info": {
+    "commandType": "devicectl.device.capture.screenshot",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "destination": "file:///scratch/json/shot.png",
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "displayUniqueID": "965BC76B-3694-4358-91DA-5C23AE187A3E",
+    "height": 2868,
+    "imageFormat": "png",
+    "width": 1320
+  }
+}

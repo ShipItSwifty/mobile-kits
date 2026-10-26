@@ -1,0 +1,37 @@
+{
+  "info": {
+    "commandType": "devicectl.device.process.launch",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "launchOptions": {
+      "activatedWhenStarted": true,
+      "arguments": [],
+      "environmentVariables": {
+        "TERM": "xterm-256color"
+      },
+      "platformSpecificOptions": {},
+      "startStopped": false,
+      "terminateExistingInstances": true,
+      "user": {
+        "active": true
+      }
+    },
+    "process": {
+      "auditToken": [
+        501,
+        501,
+        20,
+        501,
+        20,
+        63448,
+        100043,
+        16463435
+      ],
+      "processIdentifier": 63448
+    }
+  }
+}

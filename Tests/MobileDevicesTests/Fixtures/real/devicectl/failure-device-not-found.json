@@ -1,0 +1,21 @@
+{
+  "error": {
+    "code": 1000,
+    "domain": "com.apple.dt.CoreDeviceError",
+    "userInfo": {
+      "DeviceName": {
+        "string": "devicectl-grammar-check-no-such-device"
+      },
+      "NSLocalizedDescription": {
+        "string": "The specified device was not found. (Name: devicectl-grammar-check-no-such-device)"
+      }
+    }
+  },
+  "errorSignature": "(com.apple.dt.CoreDeviceError 1000)",
+  "info": {
+    "commandType": "devicectl.device.info.lockState",
+    "jsonVersion": 5,
+    "outcome": "failed",
+    "version": "651.31"
+  }
+}

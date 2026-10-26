@@ -1,0 +1,30 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.appIcon",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "icon": {
+      "pixelSize": {
+        "height": 1024,
+        "width": 1024
+      },
+      "placeholder": false,
+      "scale": 1,
+      "size": {
+        "height": 1024,
+        "width": 1024
+      }
+    },
+    "searchParameters": {
+      "allowPlaceholderIcons": false,
+      "bundleIdentifier": "com.apple.Preferences",
+      "iconHeight": 0,
+      "iconScale": 1,
+      "iconWidth": 0
+    }
+  }
+}

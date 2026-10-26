@@ -1,5 +1,5 @@
 {
-  "originHash" : "2d973f7aae4fa40cfcaa88c2b03a4bc7e76be47048d62c2eafcfcb339d5c3af3",
+  "originHash" : "b21448af60e8bc395dd8abd4970f76a58bab7bb094635a72bfc7c8875f51d90f",
   "pins" : [
     {
       "identity" : "cli-wrappers",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/ShipItSwifty/cli-wrappers.git",
       "state" : {
         "branch" : "main",
-        "revision" : "ee099c48332124ad4270a10f96afca140fbcb10a"
+        "revision" : "98b59ca7ca3496d1b9702ff3f5f1cc16969c3f1d"
       }
     },
     {

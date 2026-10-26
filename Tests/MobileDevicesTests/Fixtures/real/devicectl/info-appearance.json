@@ -1,0 +1,32 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.appearance",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "colorFilter": {
+      "enabled": false
+    },
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "increaseContrast": false,
+    "largerAccessibilitySizesEnabled": true,
+    "liquidGlassOpacity": 0.5,
+    "lookAndFeel": "Liquid Glass",
+    "reduceMotion": {
+      "enabled": false
+    },
+    "reduceTransparency": {
+      "enabled": false
+    },
+    "showBorders": {
+      "enabled": false
+    },
+    "supportedLooksAndFeels": [
+      "Liquid Glass"
+    ],
+    "textSize": "Large",
+    "userInterfaceStyle": "light"
+  }
+}

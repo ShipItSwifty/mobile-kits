@@ -1,0 +1,34 @@
+{
+  "info": {
+    "commandType": "devicectl.list.audioDevices",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "inputDevices": [
+      {
+        "name": "Test iPhone Microphone",
+        "uid": "82CC71F0-2E8A-4F7B-8516-256A00000003"
+      },
+      {
+        "name": "MacBook Pro Microphone",
+        "uid": "BuiltInMicrophoneDevice"
+      },
+      {
+        "name": "MOTIV Mix Virtual",
+        "uid": "ShureVirtualAudioDevice_UID"
+      }
+    ],
+    "outputDevices": [
+      {
+        "name": "MacBook Pro Speakers",
+        "uid": "BuiltInSpeakerDevice"
+      },
+      {
+        "name": "MOTIV Mix Virtual",
+        "uid": "ShureVirtualAudioDevice_UID"
+      }
+    ]
+  }
+}

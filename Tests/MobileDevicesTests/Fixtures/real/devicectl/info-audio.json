@@ -1,0 +1,18 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.audio",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "audioInputDevice": {
+      "systemDefault": {}
+    },
+    "audioOutputDevice": {
+      "systemDefault": {}
+    },
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "volume": 60
+  }
+}

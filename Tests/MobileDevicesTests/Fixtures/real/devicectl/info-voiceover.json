@@ -1,0 +1,13 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.voiceover",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.31"
+  },
+  "result": {
+    "deviceIdentifier": "11111111-2222-3333-4444-555555555555",
+    "enabled": false,
+    "operation": "query"
+  }
+}
