@@ -90,6 +90,30 @@ struct XcodeBuilderTestProductsTests {
         #expect(outcome.artifacts == [BuildArtifact(kind: .xctestproducts, path: products)])
     }
 
+    @Test("Product discovery can be skipped or fed settings the caller already read")
+    func productDiscoveryModes() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let app = scratch.url.appendingPathComponent("App.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let calls = Mutex(0)
+        let executor = MockExecutor { _, _ in
+            calls.withLock { $0 += 1 }
+            return ShellOutput(stdout: "** BUILD SUCCEEDED **\n", stderr: "", exitCode: 0)
+        }
+        let builder = XcodeBuilder(shell: ShellContext(executor: executor))
+        let skipped = try await builder.build(XcodeBuildRequest(scheme: "App"), productDiscovery: .skip)
+        #expect(calls.withLock { $0 } == 1, "Only the build ran")
+        #expect(skipped.artifacts.isEmpty)
+
+        let known = XcodeTargetSettings(
+            target: "App", action: "build",
+            settings: ["WRAPPER_EXTENSION": "app", "TARGET_BUILD_DIR": scratch.url.path, "FULL_PRODUCT_NAME": "App.app"])
+        let reused = try await builder.build(XcodeBuildRequest(scheme: "App"), productDiscovery: .settings([known]))
+        #expect(calls.withLock { $0 } == 2, "Known settings add no -showBuildSettings run")
+        #expect(reused.artifacts == [BuildArtifact(kind: .app, path: app.path)])
+    }
+
     @Test("export passes additional options such as -allowProvisioningUpdates")
     func exportAdditionalOptions() async throws {
         let seen = Mutex([String]())
