@@ -165,20 +165,21 @@ public struct DeviceClaimStore: Sendable {
     /// overwrite a claim someone else now holds.
     @discardableResult
     public func renew(_ claim: DeviceClaim, now: Date = Date()) throws -> DeviceClaim {
-        guard read(fileURL(deviceID: claim.deviceID))?.id == claim.id else {
-            throw MobileKitError.notFound("Claim \(claim.id) on \(claim.deviceID) no longer exists")
+        try withMutationLock(deviceID: claim.deviceID) {
+            guard read(fileURL(deviceID: claim.deviceID))?.id == claim.id else {
+                throw MobileKitError.notFound("Claim \(claim.id) on \(claim.deviceID) no longer exists")
+            }
+            var renewed = claim
+            renewed.expiresAt = Self.storedPrecision(now.addingTimeInterval(ttl))
+            try replace(renewed)
+            return renewed
         }
-        var renewed = claim
-        renewed.expiresAt = Self.storedPrecision(now.addingTimeInterval(ttl))
-        try replace(renewed)
-        return renewed
     }
 
     /// Removes the claim if it is still this one. Works after expiry, so an owner can clean up late.
     public func release(_ claim: DeviceClaim) {
-        guard read(fileURL(deviceID: claim.deviceID))?.id == claim.id else { return }
-        try? FileManager.default.removeItem(at: fileURL(deviceID: claim.deviceID))
-        logger.info("Released device", metadata: ["device": "\(claim.deviceID)", "claim": "\(claim.id)"])
+        let removed = removeIfStillStored(claim)
+        if removed { logger.info("Released device", metadata: ["device": "\(claim.deviceID)", "claim": "\(claim.id)"]) }
     }
 
     /// Retires every expired claim whose device no session is driving. Each device is re-read
@@ -200,8 +201,48 @@ public struct DeviceClaimStore: Sendable {
         guard let claim = read(url), claim.isExpired(at: now) else { return nil }
         logger.info("Reaping expired claim", metadata: ["device": "\(deviceID)", "claim": "\(claim.id)"])
         reaper?(claim)
-        try? FileManager.default.removeItem(at: url)
+        guard removeIfStillStored(claim, expiredAt: now) else { return nil }
         return claim
+    }
+
+    /// Removes the claim file only while it still holds `claim`, under the device's mutation lock,
+    /// so a claim someone else took after the read is never deleted.
+    ///
+    /// - Parameter expiredAt: When set, the stored claim must also still be expired at that time,
+    ///   so a renewal that landed after the caller's read is kept.
+    @discardableResult
+    private func removeIfStillStored(_ claim: DeviceClaim, expiredAt now: Date? = nil) -> Bool {
+        let url = fileURL(deviceID: claim.deviceID)
+        do {
+            return try withMutationLock(deviceID: claim.deviceID) {
+                guard let current = read(url), current.id == claim.id else { return false }
+                if let now, !current.isExpired(at: now) { return false }
+                return (try? FileManager.default.removeItem(at: url)) != nil
+            }
+        } catch {
+            logger.error(
+                "Could not lock device claim for removal",
+                metadata: ["device": "\(claim.deviceID)", "claim": "\(claim.id)", "error": "\(error)"])
+            return false
+        }
+    }
+
+    /// Runs `body` holding an exclusive lock on a per-device mutation lock file, so reads that
+    /// decide a write and the write itself are one step across processes.
+    ///
+    /// This is separate from ``DeviceSessionLock``, which is held for a whole session. The body
+    /// must stay short and must not take the lock again.
+    private func withMutationLock<T>(deviceID: String, _ body: () throws -> T) throws -> T {
+        try ensureDirectory()
+        let path = fileURL(deviceID: deviceID).appendingPathExtension("mutation-lock").path
+        let file = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard file >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(file) }
+        while flock(file, LOCK_EX) != 0 {
+            guard errno == EINTR else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        }
+        defer { flock(file, LOCK_UN) }
+        return try body()
     }
 
     /// Log file for a claim's long-lived holder process.
@@ -225,7 +266,7 @@ public struct DeviceClaimStore: Sendable {
     }
 
     static func holderDescription(_ claim: DeviceClaim) -> String {
-        "\(claim.id)\(claim.owner.map { " (\($0))" } ?? ""), expires \(ISO8601DateFormatter().string(from: claim.expiresAt))"
+        "\(claim.id)\(claim.owner.map { " (\($0))" } ?? ""), expires \(claim.expiresAt.formatted(.iso8601))"
     }
 
     private func stored() -> [DeviceClaim] {
@@ -249,12 +290,14 @@ public struct DeviceClaimStore: Sendable {
         try ensureDirectory()
         let temporary = try writeTemporary(claim)
         defer { unlink(temporary.path) }
-        guard link(temporary.path, fileURL(deviceID: claim.deviceID).path) == 0 else {
-            let code = errno
-            if code == EEXIST, let winner = read(fileURL(deviceID: claim.deviceID)) {
-                throw MobileKitError.deviceClaimed(device: claim.deviceID, holder: Self.holderDescription(winner))
+        try withMutationLock(deviceID: claim.deviceID) {
+            guard link(temporary.path, fileURL(deviceID: claim.deviceID).path) == 0 else {
+                let code = errno
+                if code == EEXIST, let winner = read(fileURL(deviceID: claim.deviceID)) {
+                    throw MobileKitError.deviceClaimed(device: claim.deviceID, holder: Self.holderDescription(winner))
+                }
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
             }
-            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
     }
 
@@ -278,17 +321,41 @@ public struct DeviceClaimStore: Sendable {
         return url
     }
 
-    private static func dateFormatter() -> ISO8601DateFormatter {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
+    /// The stored form: `2026-01-02T03:04:05.678Z`, UTC with millisecond precision.
+    ///
+    /// Whole seconds go through `Date.ISO8601FormatStyle` and the milliseconds are appended after
+    /// rounding to the nearest one, because the style truncates where `ISO8601DateFormatter`
+    /// (which earlier versions wrote with) rounds.
+    static func storedString(_ date: Date) -> String {
+        let milliseconds = Int64((date.timeIntervalSince1970 * 1000).rounded())
+        var seconds = milliseconds / 1000
+        var fraction = milliseconds % 1000
+        if fraction < 0 {
+            seconds -= 1
+            fraction += 1000
+        }
+        let whole = Date(timeIntervalSince1970: Double(seconds)).formatted(.iso8601)
+        let digits = String(fraction)
+        return String(whole.dropLast()) + "." + String(repeating: "0", count: 3 - digits.count) + digits + "Z"
+    }
+
+    /// Reads ``storedString(_:)`` output and the same time without a fraction. Adding the fraction
+    /// to the whole seconds as `Double`s reproduces the value `ISO8601DateFormatter` returned, so
+    /// a claim read back equals the one written.
+    static func storedDate(_ raw: String) -> Date? {
+        guard raw.hasSuffix("Z"), let dot = raw.firstIndex(of: ".") else { return try? Date(raw, strategy: .iso8601) }
+        let digits = raw[raw.index(after: dot)..<raw.index(before: raw.endIndex)]
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }), let fraction = Double("0." + digits),
+            let whole = try? Date(String(raw[..<dot]) + "Z", strategy: .iso8601)
+        else { return nil }
+        return Date(timeIntervalSince1970: whole.timeIntervalSince1970 + fraction)
     }
 
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(dateFormatter().string(from: date))
+            try container.encode(storedString(date))
         }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
@@ -298,7 +365,7 @@ public struct DeviceClaimStore: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let raw = try decoder.singleValueContainer().decode(String.self)
-            guard let date = dateFormatter().date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else {
+            guard let date = storedDate(raw) else {
                 throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: raw))
             }
             return date
