@@ -10,6 +10,14 @@ extension Logger {
     }
 }
 
+extension Command {
+    /// Applies `duration` as the command's timeout; `nil` leaves the command unchanged.
+    package func timeout(_ duration: Duration?) -> Command {
+        guard let duration else { return self }
+        return timeout(duration)
+    }
+}
+
 /// Runs command families and turns SwiftyShell failures into ``MobileKitError``s that carry the
 /// argv and output, so callers can report what failed without re-deriving the command.
 public enum ToolRunner {

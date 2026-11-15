@@ -14,15 +14,21 @@ public struct FlutterBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
     private let executable: (path: String, prefix: [String])
+    private let timeout: Duration?
     private let logger = Logger.forType(FlutterBuilder.self)
 
-    /// - Parameter executable: `("flutter", [])`, or `("fvm", ["flutter"])` for FVM-managed SDKs.
+    /// - Parameters:
+    ///   - executable: `("flutter", [])`, or `("fvm", ["flutter"])` for FVM-managed SDKs.
+    ///   - timeout: Limit for each build command; exceeding it throws
+    ///     ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
     public init(
-        shell: ShellContext = .init(), output: BuildOutput = .init(), executable: (path: String, prefix: [String]) = ("flutter", [])
+        shell: ShellContext = .init(), output: BuildOutput = .init(), executable: (path: String, prefix: [String]) = ("flutter", []),
+        timeout: Duration? = nil
     ) {
         self.shell = shell
         self.output = output
         self.executable = executable
+        self.timeout = timeout
     }
 
     private func flutter(in directory: String) -> Flutter {
@@ -55,7 +61,7 @@ public struct FlutterBuilder: Sendable {
         let family = flutter(in: directory).build(
             target, mode: mode, simulator: simulator, codesign: codesign, flavor: flavor, dartDefines: dartDefines,
             entryPoint: entryPoint, buildName: buildName, buildNumber: buildNumber, exportOptionsPlist: exportOptionsPlist)
-        let (log, duration) = try await runBuild(family, backend: .flutter)
+        let (log, duration) = try await runBuild(family, backend: .flutter, timeout: timeout)
         let artifacts = Self.builtArtifacts(in: log.stdout + "\n" + log.stderr, relativeTo: directory)
         return BuildOutcome(
             backend: .flutter, artifacts: artifacts, durationSeconds: duration, output: log,
@@ -102,12 +108,18 @@ public struct ReactNativeBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
     private let runner: JSPackageRunner
+    private let timeout: Duration?
     private let logger = Logger.forType(ReactNativeBuilder.self)
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), runner: JSPackageRunner = .npx) {
+    /// - Parameter timeout: Limit for each native build command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(
+        shell: ShellContext = .init(), output: BuildOutput = .init(), runner: JSPackageRunner = .npx, timeout: Duration? = nil
+    ) {
         self.shell = shell
         self.output = output
         self.runner = runner
+        self.timeout = timeout
     }
 
     /// Runs `expo prebuild` when the project has no `ios/` or `android/` directory yet.
@@ -148,7 +160,7 @@ public struct ReactNativeBuilder: Sendable {
             }
             resolved.container = .workspace((ios as NSString).appendingPathComponent(workspaces[0]))
         }
-        return try await XcodeBuilder(shell: shell, output: output).build(resolved)
+        return try await XcodeBuilder(shell: shell, output: output, timeout: timeout).build(resolved)
     }
 
     /// Builds the Android app with Gradle in `<directory>/android`.
@@ -160,7 +172,7 @@ public struct ReactNativeBuilder: Sendable {
         environment: [String: String] = [:]
     ) async throws -> BuildOutcome {
         let android = (directory as NSString).appendingPathComponent("android")
-        return try await GradleBuilder(shell: shell, output: output)
+        return try await GradleBuilder(shell: shell, output: output, timeout: timeout)
             .assemble(module: module, variant: variant, flavor: flavor, in: GradleProject(directory: android, environment: environment))
     }
 
@@ -198,10 +210,14 @@ public struct ReactNativeBuilder: Sendable {
 public struct KMPBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for each build command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// Builds the Android app module.
@@ -210,13 +226,13 @@ public struct KMPBuilder: Sendable {
     ) async throws
         -> BuildOutcome
     {
-        try await GradleBuilder(shell: shell, output: output).assemble(module: module, variant: variant, in: project)
+        try await GradleBuilder(shell: shell, output: output, timeout: timeout).assemble(module: module, variant: variant, in: project)
     }
 
     /// Links the shared module's Apple framework, e.g. `linkDebugFrameworkIosSimulatorArm64` or
     /// `assembleSharedXCFramework`.
     public func buildFramework(module: String = "shared", task: String, in project: GradleProject) async throws -> BuildOutcome {
-        var outcome = try await GradleBuilder(shell: shell, output: output)
+        var outcome = try await GradleBuilder(shell: shell, output: output, timeout: timeout)
             .run([GradleTask.custom(task).qualified(module: module)], in: project, modules: [module])
         outcome.artifacts += Self.frameworks(
             inBuildDirectory: URL(fileURLWithPath: project.directory).appendingPathComponent(module).appendingPathComponent("build"))
@@ -240,6 +256,6 @@ public struct KMPBuilder: Sendable {
     /// Builds the iOS host app. Its build phase normally invokes Gradle
     /// (`embedAndSignAppleFrameworkForXcode`), so a separate framework build is optional.
     public func buildIOS(_ request: XcodeBuildRequest) async throws -> BuildOutcome {
-        try await XcodeBuilder(shell: shell, output: output).build(request)
+        try await XcodeBuilder(shell: shell, output: output, timeout: timeout).build(request)
     }
 }

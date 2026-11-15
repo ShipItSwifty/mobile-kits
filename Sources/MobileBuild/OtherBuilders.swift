@@ -101,13 +101,20 @@ public struct BazelBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
     private let executablePath: String
+    private let timeout: Duration?
     private let logger = Logger.forType(BazelBuilder.self)
 
-    /// - Parameter executablePath: `bazel`, `bazelisk`, or a workspace wrapper such as `./tools/bazel`.
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), executablePath: String = "bazel") {
+    /// - Parameters:
+    ///   - executablePath: `bazel`, `bazelisk`, or a workspace wrapper such as `./tools/bazel`.
+    ///   - timeout: Limit for each build command; exceeding it throws
+    ///     ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(
+        shell: ShellContext = .init(), output: BuildOutput = .init(), executablePath: String = "bazel", timeout: Duration? = nil
+    ) {
         self.shell = shell
         self.output = output
         self.executablePath = executablePath
+        self.timeout = timeout
     }
 
     /// `bazel build <targets>` with a build-event file, returning every default output.
@@ -121,7 +128,7 @@ public struct BazelBuilder: Sendable {
             .build(targets)
             .options(options + [.buildEventJSONFile(events.path)])
             .workingDirectory(workspace)
-        let (log, duration) = try await runBuild(family, backend: .bazel)
+        let (log, duration) = try await runBuild(family, backend: .bazel, timeout: timeout)
         let stream = BuildEventStream.parse((try? String(contentsOf: events, encoding: .utf8)) ?? "")
         let artifacts = stream.targets.flatMap(\.files).map { BuildArtifact(kind: artifactKind(for: $0) ?? .other, path: $0) }
         return BuildOutcome(
@@ -136,10 +143,14 @@ public struct BazelBuilder: Sendable {
 public struct SwiftPMBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for each build command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// `swift build`, reporting the product executable when `product` names one.
@@ -153,7 +164,7 @@ public struct SwiftPMBuilder: Sendable {
             .settingStdoutDestination(output.stdout)
             .settingStderrDestination(output.stderr)
             .build(packagePath: packagePath, product: product, configuration: configuration, scratchPath: scratchPath)
-        let (log, duration) = try await runBuild(family, backend: .swiftPM)
+        let (log, duration) = try await runBuild(family, backend: .swiftPM, timeout: timeout)
         var artifacts: [BuildArtifact] = []
         if let product {
             let binPath = try await ToolRunner.run(

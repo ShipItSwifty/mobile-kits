@@ -37,11 +37,15 @@ public struct GradleProject: Sendable, Equatable {
 public struct GradleBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
     private let logger = Logger.forType(GradleBuilder.self)
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for each build command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// The `gradle` invocation for `project`, before tasks are added.
@@ -73,13 +77,13 @@ public struct GradleBuilder: Sendable {
         logger.info("Gradle build", metadata: ["tasks": "\(tasks.map(\.name))", "project": "\(project.directory)"])
         let started = Date()
         let family = command(for: project).tasks((clean ? [.clean] : []) + tasks)
-        let (log, duration) = try await runBuild(family, backend: .gradle) { GradleLogSummary.parse($0).resultLine }
+        let (log, duration) = try await runBuild(family, backend: .gradle, timeout: timeout) { GradleLogSummary.parse($0).resultLine }
         let directory = URL(
             fileURLWithPath: project.directory,
             relativeTo: URL(fileURLWithPath: shell.workingDirectory ?? FileManager.default.currentDirectoryPath, isDirectory: true)
         ).standardizedFileURL.path
         let artifacts = Self.outputs(projectDirectory: directory, modules: modules, modifiedSince: started, tasks: tasks)
-        let summary = GradleLogSummary.parse(log.stdout)
+        let summary = GradleLogSummary.parse(log.stdout + "\n" + log.stderr)
         logger.info("Gradle build finished", metadata: ["result": "\(summary.resultLine ?? "")", "artifacts": "\(artifacts.count)"])
         return BuildOutcome(
             backend: .gradle, artifacts: artifacts, warnings: summary.warningCount, resultLine: summary.resultLine,
