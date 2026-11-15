@@ -80,6 +80,44 @@ struct AndroidDeviceManagerTests {
 
 @Suite("AndroidEmulatorManager attached start")
 struct AndroidEmulatorAttachedTests {
+    @Test("The emulator running an AVD is found among several, and port selection reuses a listing")
+    func runningSerialAmongSeveral() async throws {
+        let listCalls = Mutex(0)
+        let executor = MockExecutor { command, _ in
+            let arguments = command.arguments
+            if arguments.contains("devices") {
+                listCalls.withLock { $0 += 1 }
+                return ShellOutput(
+                    stdout: """
+                        List of devices attached
+                        emulator-5554          device product:a model:a device:a transport_id:1
+                        emulator-5556          device product:b model:b device:b transport_id:2
+                        emulator-5558          device product:c model:c device:c transport_id:3
+
+                        """, stderr: "", exitCode: 0)
+            }
+            if arguments.contains("avd") && arguments.contains("name") {
+                let name = ["emulator-5554": "Pixel_6", "emulator-5556": "Pixel_7", "emulator-5558": "Pixel_8"][arguments[1]] ?? ""
+                return ShellOutput(stdout: "\(name)\nOK\n", stderr: "", exitCode: 0)
+            }
+            return ShellOutput(stdout: "1\n", stderr: "", exitCode: 0)
+        }
+        let manager = AndroidEmulatorManager(shell: ShellContext(executor: executor))
+        #expect(try await manager.runningSerial(avd: "Pixel_7") == "emulator-5556")
+        #expect(try await manager.runningSerial(avd: "Pixel_9") == nil)
+        listCalls.withLock { $0 = 0 }
+        let booted = try await manager.boot(avd: "Pixel_8", timeout: .seconds(5))
+        #expect(booted.serial == "emulator-5558")
+        #expect(booted.started == nil)
+        #expect(listCalls.withLock { $0 } == 1)
+
+        listCalls.withLock { $0 = 0 }
+        let listing = AndroidDeviceManager.parseDevices(
+            "List of devices attached\nemulator-5554 device transport_id:1\nemulator-5556 device transport_id:2\n")
+        #expect(try await manager.freeConsolePort(listing: listing) == 5558)
+        #expect(listCalls.withLock { $0 } == 0, "A supplied listing is reused, not fetched again")
+    }
+
     @Test("An attached emulator is spawned as a child, keeps its process handle, and stops through it")
     func attachedStartAndStop() async throws {
         let seen = Mutex([[String]]())

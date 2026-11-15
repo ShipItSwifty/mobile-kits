@@ -166,9 +166,33 @@ public struct AndroidEmulatorManager: Sendable {
     }
 
     /// The serial of a running emulator started from `avd`, if any.
+    ///
+    /// Each emulator is asked for its AVD name concurrently, so the worst case is one query
+    /// timeout instead of one per emulator. With several matches the first in `adb devices` order wins.
+    ///
+    /// - Throws: The first query failure, only when no emulator matched.
     public func runningSerial(avd: String) async throws -> String? {
-        for serial in try await runningSerials() where try await avdName(ofSerial: serial) == avd {
-            return serial
+        try await runningSerial(avd: avd, among: try await devices.list())
+    }
+
+    func runningSerial(avd: String, among listing: [AndroidDevice]) async throws -> String? {
+        let serials = listing.filter { $0.kind == .emulator }.map(\.serial)
+        guard !serials.isEmpty else { return nil }
+        let outcomes = await withTaskGroup(of: (Int, Result<String?, Error>).self) { group in
+            for (index, serial) in serials.enumerated() {
+                group.addTask {
+                    do { return (index, .success(try await self.avdName(ofSerial: serial))) } catch { return (index, .failure(error)) }
+                }
+            }
+            var collected: [Int: Result<String?, Error>] = [:]
+            for await (index, outcome) in group { collected[index] = outcome }
+            return collected
+        }
+        for index in serials.indices {
+            if case .success(let name)? = outcomes[index], name == avd { return serials[index] }
+        }
+        for index in serials.indices {
+            if case .failure(let error)? = outcomes[index] { throw error }
         }
         return nil
     }
@@ -182,11 +206,18 @@ public struct AndroidEmulatorManager: Sendable {
     ) async throws
         -> EmulatorInstance
     {
+        try await start(avd: avd, options: options, logPath: logPath, listing: nil)
+    }
+
+    /// - Parameter listing: A device listing the caller just took, reused to pick the console port.
+    func start(
+        avd: String, options: EmulatorBootOptions, logPath: String?, listing: [AndroidDevice]?
+    ) async throws -> EmulatorInstance {
         let port: Int
         if let requested = options.port {
             port = requested
         } else {
-            port = try await freeConsolePort()
+            port = try await freeConsolePort(listing: listing)
         }
         logger.info(
             "Starting emulator",
@@ -236,12 +267,13 @@ public struct AndroidEmulatorManager: Sendable {
     ) async throws
         -> (serial: String, started: EmulatorInstance?)
     {
-        if let serial = try await runningSerial(avd: avd) {
+        let listing = try await devices.list()
+        if let serial = try await runningSerial(avd: avd, among: listing) {
             logger.info("Reusing running emulator", metadata: ["avd": "\(avd)", "serial": "\(serial)"])
             try await devices.waitForBoot(serial, timeout: timeout)
             return (serial, nil)
         }
-        let instance = try await start(avd: avd, options: options)
+        let instance = try await start(avd: avd, options: options, logPath: nil, listing: listing)
         do {
             try await waitUntilBooted(instance, timeout: timeout)
         } catch {
@@ -296,8 +328,10 @@ public struct AndroidEmulatorManager: Sendable {
     }
 
     /// The first even console port in 5554–5682 that no running emulator uses.
-    func freeConsolePort() async throws -> Int {
-        let used = Set(try await devices.list().compactMap(\.emulatorConsolePort))
+    func freeConsolePort(listing: [AndroidDevice]? = nil) async throws -> Int {
+        let current: [AndroidDevice]
+        if let listing { current = listing } else { current = try await devices.list() }
+        let used = Set(current.compactMap(\.emulatorConsolePort))
         guard let port = stride(from: 5554, through: 5682, by: 2).first(where: { !used.contains($0) }) else {
             throw MobileKitError.invalidRequest("No free emulator console port between 5554 and 5682")
         }
