@@ -478,21 +478,31 @@ public struct SwiftPMTestRunner: Sendable {
 /// Runs `flutter test` (unit and widget tests on the host) and `integration_test` on a device.
 public struct FlutterTestRunner: Sendable {
     private let shell: ShellContext
+    private let output: BuildOutput
     private let executable: (path: String, prefix: [String])
     private let timeout: Duration?
 
-    /// - Parameter timeout: Limit for the test command; exceeding it throws
-    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    /// - Parameters:
+    ///   - output: Where the test output goes while it runs. Streaming it must keep
+    ///     `--machine` output parseable, so echo to stderr (``BuildOutput/streamingToStderr``)
+    ///     rather than stdout when stdout is machine-read.
+    ///   - timeout: Limit for the test command; exceeding it throws
+    ///     ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
     public init(
-        shell: ShellContext = .init(), executable: (path: String, prefix: [String]) = ("flutter", []), timeout: Duration? = nil
+        shell: ShellContext = .init(), output: BuildOutput = .init(), executable: (path: String, prefix: [String]) = ("flutter", []),
+        timeout: Duration? = nil
     ) {
         self.shell = shell
+        self.output = output
         self.executable = executable
         self.timeout = timeout
     }
 
     private func flutter(_ directory: String) -> Flutter {
-        Flutter(context: shell, executablePath: executable.path, prefix: executable.prefix).workingDirectory(directory)
+        Flutter(context: shell, executablePath: executable.path, prefix: executable.prefix)
+            .settingStdoutDestination(output.stdout)
+            .settingStderrDestination(output.stderr)
+            .workingDirectory(directory)
     }
 
     /// Unit and widget tests, `--machine` output parsed.
@@ -535,12 +545,17 @@ public struct FlutterTestRunner: Sendable {
 /// Runs a JavaScript project's test script, reading Jest's JSON report when the script is Jest.
 public struct JestTestRunner: Sendable {
     private let shell: ShellContext
+    private let output: BuildOutput
     private let timeout: Duration?
 
-    /// - Parameter timeout: Limit for the test command; exceeding it throws
-    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
-    public init(shell: ShellContext = .init(), timeout: Duration? = nil) {
+    /// - Parameters:
+    ///   - output: Where the script's output goes while it runs, for example
+    ///     ``BuildOutput/streamingToStderr``.
+    ///   - timeout: Limit for the test command; exceeding it throws
+    ///     ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
+        self.output = output
         self.timeout = timeout
     }
 
@@ -565,7 +580,7 @@ public struct JestTestRunner: Sendable {
         }
         let clock = ContinuousClock()
         let start = clock.now
-        let log = try await project.run(script: script, arguments: arguments, timeout: timeout)
+        let log = try await project.run(script: script, arguments: arguments, output: output, timeout: timeout)
         let elapsed = (clock.now - start).components
         let argv = [project.packageManager.rawValue, "run", script, "--"] + arguments
         guard FileManager.default.fileExists(atPath: report.path),
