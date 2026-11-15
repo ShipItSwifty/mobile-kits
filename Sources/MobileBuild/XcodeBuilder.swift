@@ -181,7 +181,7 @@ public struct XcodeBuilder: Sendable {
     public func build(_ request: XcodeBuildRequest, clean: Bool = false) async throws -> BuildOutcome {
         logger.info("xcodebuild build", metadata: ["scheme": "\(request.scheme)", "configuration": "\(request.configuration)"])
         let (log, duration) = try await runBuild(command(for: request).build(clean: clean), backend: .xcodebuild, timeout: timeout) {
-            XcodeBuildLogSummary.parse($0).resultLine
+            XcodeBuildLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
         }
         let products = try await products(for: request)
         return outcome(log, duration: duration, artifacts: products.artifacts, diagnostics: products.diagnostics)
@@ -193,7 +193,7 @@ public struct XcodeBuilder: Sendable {
         logger.info("xcodebuild build-for-testing", metadata: ["scheme": "\(request.scheme)"])
         let started = Date()
         let (log, duration) = try await runBuild(command(for: request).buildForTesting(), backend: .xcodebuild, timeout: timeout) {
-            XcodeBuildLogSummary.parse($0).resultLine
+            XcodeBuildLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
         }
         let products = try await products(for: request)
         let testRuns = Self.xctestrunFiles(in: products.productsDirectory, modifiedSince: started)
@@ -213,7 +213,7 @@ public struct XcodeBuilder: Sendable {
         var resolved = request
         resolved.additionalOptions.append(.testProductsPath(testProductsPath))
         let (log, duration) = try await runBuild(command(for: resolved).buildForTesting(), backend: .xcodebuild, timeout: timeout) {
-            XcodeBuildLogSummary.parse($0).resultLine
+            XcodeBuildLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
         }
         let written = FileManager.default.fileExists(atPath: testProductsPath)
         return outcome(
@@ -225,7 +225,7 @@ public struct XcodeBuilder: Sendable {
     public func archive(_ request: XcodeBuildRequest, archivePath: String) async throws -> BuildOutcome {
         logger.info("xcodebuild archive", metadata: ["scheme": "\(request.scheme)", "archive": "\(archivePath)"])
         let (log, duration) = try await runBuild(command(for: request).archive(path: archivePath), backend: .xcodebuild, timeout: timeout) {
-            XcodeBuildLogSummary.parse($0).resultLine
+            XcodeBuildLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
         }
         var artifacts = [BuildArtifact(kind: .xcarchive, path: archivePath)]
         let dsyms = (archivePath as NSString).appendingPathComponent("dSYMs")
@@ -255,7 +255,7 @@ public struct XcodeBuilder: Sendable {
         for option in additionalOptions { xcodebuild = xcodebuild.option(option) }
         let family = xcodebuild.exportArchive(archivePath: archivePath, exportPath: exportPath, exportOptionsPlist: plist.path)
         let (log, duration) = try await runBuild(family, backend: .xcodebuild, timeout: timeout) {
-            XcodeBuildLogSummary.parse($0).resultLine
+            XcodeBuildLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
         }
         let ipas = ((try? FileManager.default.contentsOfDirectory(atPath: exportPath)) ?? []).sorted().filter { $0.hasSuffix(".ipa") }
         return outcome(
@@ -314,7 +314,7 @@ public struct XcodeBuilder: Sendable {
     }
 
     private func outcome(_ log: ShellOutput, duration: Double, artifacts: [BuildArtifact], diagnostics: [String] = []) -> BuildOutcome {
-        let summary = XcodeBuildLogSummary.parse(log.stdout + "\n" + log.stderr)
+        let summary = XcodeBuildLogSummary.parse(stdout: log.stdout, stderr: log.stderr)
         return BuildOutcome(
             backend: .xcodebuild, artifacts: artifacts, warnings: summary.warningCount, errors: summary.errorCount,
             resultLine: summary.resultLine, durationSeconds: duration, output: log, diagnostics: diagnostics)

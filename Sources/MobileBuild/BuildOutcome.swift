@@ -45,6 +45,27 @@ public struct BuildOutput: Sendable {
         self.stderr = stderr
     }
 
+    /// Writes each stream's full log to a file and keeps only the last `tailBytes` of it in memory,
+    /// for long CI builds whose complete output is too large to hold.
+    ///
+    /// ``BuildOutcome/output`` then holds the tail, which still carries the result line and the
+    /// final errors, so summaries and ``BuildFailure`` keep working.
+    ///
+    /// - Parameters:
+    ///   - stdoutPath: File that receives the full standard output.
+    ///   - stderrPath: File that receives the full standard error; `stdoutPath` when `nil`, so one
+    ///     file holds the interleaved log.
+    ///   - tailBytes: Bytes kept in memory per stream.
+    ///   - echo: Also stream live to this process's own stderr, as ``streamingToStderr`` does.
+    public static func logged(
+        stdoutPath: String, stderrPath: String? = nil, tailBytes: Int = 256 * 1024, echo: Bool = false
+    ) -> BuildOutput {
+        let errorPath = stderrPath ?? stdoutPath
+        return BuildOutput(
+            stdout: .log(path: stdoutPath, append: false, tailBytes: tailBytes, tee: echo ? .stderr : nil),
+            stderr: .log(path: errorPath, append: errorPath == stdoutPath, tailBytes: tailBytes, tee: echo ? .stderr : nil))
+    }
+
     /// Captured and echoed live (`.tee`), for long builds a person is watching.
     public static let streaming = BuildOutput(stdout: .tee, stderr: .tee)
     /// Captured and echoed to stderr, keeping stdout free for machine-readable output.
@@ -121,6 +142,16 @@ public struct XcodeBuildLogSummary: Sendable, Equatable {
         self.errorCount = errorCount
     }
 
+    /// Reads both streams without joining them: the first result line wins (standard output
+    /// first) and the counts add up.
+    public static func parse(stdout: String, stderr: String) -> XcodeBuildLogSummary {
+        let out = parse(stdout)
+        let err = parse(stderr)
+        return XcodeBuildLogSummary(
+            resultLine: out.resultLine ?? err.resultLine, warningCount: out.warningCount + err.warningCount,
+            errorCount: out.errorCount + err.errorCount)
+    }
+
     /// Reads `** BUILD SUCCEEDED **`-style markers and clang/swift `file:line:col: warning:` lines.
     public static func parse(_ log: String) -> XcodeBuildLogSummary {
         var summary = XcodeBuildLogSummary()
@@ -152,6 +183,16 @@ public struct GradleLogSummary: Sendable, Equatable {
         self.warningCount = warningCount
     }
 
+    /// Reads both streams without joining them: the first match of each line kind wins (standard
+    /// output first) and the warning counts add up.
+    public static func parse(stdout: String, stderr: String) -> GradleLogSummary {
+        let out = parse(stdout)
+        let err = parse(stderr)
+        return GradleLogSummary(
+            resultLine: out.resultLine ?? err.resultLine, actionableTasksLine: out.actionableTasksLine ?? err.actionableTasksLine,
+            buildScanURL: out.buildScanURL ?? err.buildScanURL, warningCount: out.warningCount + err.warningCount)
+    }
+
     public static func parse(_ log: String) -> GradleLogSummary {
         var summary = GradleLogSummary()
         for rawLine in log.split(whereSeparator: \.isNewline) {
@@ -179,7 +220,7 @@ func runBuild<Family: RunnableCommandFamily>(
     _ family: Family,
     backend: BuildBackend,
     timeout: Duration? = nil,
-    summarize: (String) -> String? = { _ in nil }
+    summarize: (ShellOutput) -> String? = { _ in nil }
 ) async throws -> (ShellOutput, Double) {
     let logger = Logger.forType(BuildFailure.self)
     let command = family.command().timeout(timeout)
@@ -197,7 +238,7 @@ func runBuild<Family: RunnableCommandFamily>(
         logger.error("Build command failed", metadata: ["backend": "\(backend.rawValue)", "exitCode": "\(output.exitCode)"])
         throw BuildFailure(
             backend: backend, command: argv, exitCode: output.exitCode, output: output,
-            summary: summarize(output.stdout + "\n" + output.stderr))
+            summary: summarize(output))
     } catch let error as ShellError {
         logger.error("Build command did not finish", metadata: ["backend": "\(backend.rawValue)", "error": "\(error)"])
         throw ToolRunner.map(error, argv: argv)

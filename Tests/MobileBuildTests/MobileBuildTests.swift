@@ -214,6 +214,39 @@ struct FrameworkBuilderTests {
         #expect(stream.tests.first?.durationMillis == 1500)
     }
 
+    @Test("Summarizing the streams separately matches summarizing them joined")
+    func separateStreamSummaries() {
+        let stdout = "a.swift:1:2: warning: w\nBUILD SUCCESSFUL in 9s\n12 actionable tasks: 3 executed\n"
+        let stderr = "w: A.kt:1 unused\n** BUILD FAILED **\nb.swift:3:4: error: e\nhttps://gradle.com/s/abc\n"
+        #expect(
+            GradleLogSummary.parse(stdout: stdout, stderr: stderr) == GradleLogSummary.parse(stdout + "\n" + stderr))
+        #expect(
+            XcodeBuildLogSummary.parse(stdout: stdout, stderr: stderr) == XcodeBuildLogSummary.parse(stdout + "\n" + stderr))
+        #expect(XcodeBuildLogSummary.parse(stdout: "", stderr: stderr).resultLine == "** BUILD FAILED **")
+    }
+
+    @Test("A logged BuildOutput writes the full log to files and keeps a bounded tail")
+    func loggedOutput() throws {
+        let both = BuildOutput.logged(stdoutPath: "/tmp/build.log", tailBytes: 1024, echo: true)
+        guard case .log(let outPath, let outAppend, let outTail, let outTee) = both.stdout,
+            case .log(let errPath, let errAppend, let errTail, let errTee) = both.stderr
+        else {
+            Issue.record("Expected log destinations")
+            return
+        }
+        #expect(outPath == "/tmp/build.log" && errPath == "/tmp/build.log")
+        #expect(!outAppend && errAppend, "One shared file: the second stream appends")
+        #expect(outTail == 1024 && errTail == 1024)
+        #expect(outTee == .stderr && errTee == .stderr)
+
+        let split = BuildOutput.logged(stdoutPath: "/tmp/out.log", stderrPath: "/tmp/err.log")
+        guard case .log(_, _, _, let quiet) = split.stdout, case .log(let separate, let append, _, _) = split.stderr else {
+            Issue.record("Expected log destinations")
+            return
+        }
+        #expect(quiet == nil && separate == "/tmp/err.log" && !append)
+    }
+
     @Test("Log summaries")
     func summaries() {
         let xcode = XcodeBuildLogSummary.parse("a.swift:1:2: warning: w\nb.swift:3:4: error: e\n** BUILD FAILED **\n")
