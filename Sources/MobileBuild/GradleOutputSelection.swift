@@ -7,7 +7,9 @@ struct GradleOutputSelection {
     let module: String
     let root: String
 
-    func includes(_ file: URL, fresh: Bool) -> Bool {
+    /// - Parameter metadata: The parsed `output-metadata.json` when `file` is one, so a caller that
+    ///   already read it does not make this read it again for every task.
+    func includes(_ file: URL, fresh: Bool, metadata parsed: [String: Any]? = nil) -> Bool {
         guard !tasks.isEmpty else { return fresh }
         return tasks.contains { task in
             let parts = task.name.split(separator: ":").map(String.init)
@@ -28,10 +30,7 @@ struct GradleOutputSelection {
             if variant.hasSuffix("AndroidTest") { variant = String(variant.dropLast("AndroidTest".count)) }
             guard !variant.isEmpty else { return true }
             let actual: String
-            if isAPK, let data = try? Data(contentsOf: file),
-                let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let recorded = metadata["variantName"] as? String
-            {
+            if isAPK, let recorded = (parsed ?? GradleBuilder.readMetadata(file))?["variantName"] as? String {
                 actual = recorded
             } else {
                 // Older APK metadata omits variantName; its path is apk/<flavor>/<buildType>.

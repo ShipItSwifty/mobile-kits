@@ -135,18 +135,20 @@ public struct GradleBuilder: Sendable {
             : modules.map { root.appendingPathComponent($0.replacingOccurrences(of: ":", with: "/")) }
         var artifacts: [BuildArtifact] = []
         for module in moduleDirectories {
+            let selection = GradleOutputSelection(tasks: tasks, module: module.path, root: root.path)
             let outputs = module.appendingPathComponent("build/outputs")
             guard let files = fileManager.enumerator(at: outputs, includingPropertiesForKeys: [.contentModificationDateKey]) else {
                 continue
             }
             for case let file as URL in files {
                 let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                let selection = GradleOutputSelection(tasks: tasks, module: module.path, root: root.path)
                 let fresh = (modified ?? .distantFuture) >= date.addingTimeInterval(-1)
-                guard selection.includes(file, fresh: fresh) else { continue }
-                if file.lastPathComponent == "output-metadata.json" {
+                let isMetadata = file.lastPathComponent == "output-metadata.json"
+                let metadata = isMetadata ? readMetadata(file) : nil
+                guard selection.includes(file, fresh: fresh, metadata: metadata) else { continue }
+                if isMetadata {
                     let isTest = file.path.contains("/androidTest/")
-                    for apk in apkPaths(fromMetadata: file) {
+                    for apk in apkPaths(in: metadata, next: file) {
                         artifacts.append(BuildArtifact(kind: isTest ? .testAPK : .apk, path: apk))
                     }
                 } else if file.pathExtension == "aab" {
@@ -159,12 +161,20 @@ public struct GradleBuilder: Sendable {
 
     /// `elements[].outputFile`, resolved next to the metadata file.
     static func apkPaths(fromMetadata url: URL) -> [String] {
-        guard let data = try? Data(contentsOf: url),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let elements = object["elements"] as? [[String: Any]]
-        else { return [] }
+        apkPaths(in: readMetadata(url), next: url)
+    }
+
+    /// `elements[].outputFile` from already-parsed metadata, resolved next to `url`.
+    static func apkPaths(in metadata: [String: Any]?, next url: URL) -> [String] {
+        guard let elements = metadata?["elements"] as? [[String: Any]] else { return [] }
         return elements.compactMap { $0["outputFile"] as? String }.map {
             url.deletingLastPathComponent().appendingPathComponent($0).path
         }
+    }
+
+    /// The parsed JSON object at `url`, or `nil` when it is missing or not an object.
+    static func readMetadata(_ url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }
