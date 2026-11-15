@@ -142,11 +142,15 @@ public struct ExportOptions: Sendable, Equatable {
 public struct XcodeBuilder: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
     private let logger = Logger.forType(XcodeBuilder.self)
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for each build command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// The `xcodebuild` invocation for `request`, before an action is selected.
@@ -176,7 +180,7 @@ public struct XcodeBuilder: Sendable {
     /// `xcodebuild build`, returning the built `.app` bundles and dSYMs.
     public func build(_ request: XcodeBuildRequest, clean: Bool = false) async throws -> BuildOutcome {
         logger.info("xcodebuild build", metadata: ["scheme": "\(request.scheme)", "configuration": "\(request.configuration)"])
-        let (log, duration) = try await runBuild(command(for: request).build(clean: clean), backend: .xcodebuild) {
+        let (log, duration) = try await runBuild(command(for: request).build(clean: clean), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
         let products = try await products(for: request)
@@ -188,7 +192,7 @@ public struct XcodeBuilder: Sendable {
     public func buildForTesting(_ request: XcodeBuildRequest) async throws -> BuildOutcome {
         logger.info("xcodebuild build-for-testing", metadata: ["scheme": "\(request.scheme)"])
         let started = Date()
-        let (log, duration) = try await runBuild(command(for: request).buildForTesting(), backend: .xcodebuild) {
+        let (log, duration) = try await runBuild(command(for: request).buildForTesting(), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
         let products = try await products(for: request)
@@ -208,7 +212,7 @@ public struct XcodeBuilder: Sendable {
         logger.info("xcodebuild build-for-testing", metadata: ["scheme": "\(request.scheme)", "products": "\(testProductsPath)"])
         var resolved = request
         resolved.additionalOptions.append(.testProductsPath(testProductsPath))
-        let (log, duration) = try await runBuild(command(for: resolved).buildForTesting(), backend: .xcodebuild) {
+        let (log, duration) = try await runBuild(command(for: resolved).buildForTesting(), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
         let written = FileManager.default.fileExists(atPath: testProductsPath)
@@ -220,7 +224,7 @@ public struct XcodeBuilder: Sendable {
     /// `xcodebuild archive -archivePath <path>`.
     public func archive(_ request: XcodeBuildRequest, archivePath: String) async throws -> BuildOutcome {
         logger.info("xcodebuild archive", metadata: ["scheme": "\(request.scheme)", "archive": "\(archivePath)"])
-        let (log, duration) = try await runBuild(command(for: request).archive(path: archivePath), backend: .xcodebuild) {
+        let (log, duration) = try await runBuild(command(for: request).archive(path: archivePath), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
         var artifacts = [BuildArtifact(kind: .xcarchive, path: archivePath)]
@@ -250,7 +254,9 @@ public struct XcodeBuilder: Sendable {
             .settingStderrDestination(output.stderr)
         for option in additionalOptions { xcodebuild = xcodebuild.option(option) }
         let family = xcodebuild.exportArchive(archivePath: archivePath, exportPath: exportPath, exportOptionsPlist: plist.path)
-        let (log, duration) = try await runBuild(family, backend: .xcodebuild) { XcodeBuildLogSummary.parse($0).resultLine }
+        let (log, duration) = try await runBuild(family, backend: .xcodebuild, timeout: timeout) {
+            XcodeBuildLogSummary.parse($0).resultLine
+        }
         let ipas = ((try? FileManager.default.contentsOfDirectory(atPath: exportPath)) ?? []).sorted().filter { $0.hasSuffix(".ipa") }
         return outcome(
             log, duration: duration,

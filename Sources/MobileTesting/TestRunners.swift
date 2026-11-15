@@ -46,21 +46,30 @@ public struct TestExecutionFailure: Error, Sendable, LocalizedError {
 }
 
 /// Runs `family`, returning its output whatever the exit status, with the elapsed time.
-func execute<Family: RunnableCommandFamily>(_ family: Family) async throws -> (ShellOutput, [String], Double) {
-    let command = family.command().outputLimit(0)
+func execute<Family: RunnableCommandFamily>(
+    _ family: Family, timeout: Duration? = nil
+) async throws -> (ShellOutput, [String], Double) {
+    let logger = Logger.forType(TestExecution.self)
+    let command = family.command().outputLimit(0).timeout(timeout)
     let argv = [command.executableName] + command.arguments
     let clock = ContinuousClock()
     let start = clock.now
+    logger.info("Running test command", metadata: ["tool": "\(command.executableName)", "arguments": "\(command.arguments.count)"])
     let output: ShellOutput
     do {
         output = try await command.run(in: family.context)
     } catch let ShellError.exitFailure(_, captured) {
         output = captured
     } catch let error as ShellError {
+        logger.error("Test command did not finish", metadata: ["tool": "\(command.executableName)", "error": "\(error)"])
         throw ToolRunner.map(error, argv: argv)
     }
     let elapsed = (clock.now - start).components
-    return (output, argv, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+    let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+    logger.info(
+        "Test command finished",
+        metadata: ["tool": "\(command.executableName)", "exitCode": "\(output.exitCode)", "seconds": "\(seconds)"])
+    return (output, argv, seconds)
 }
 
 // MARK: - Xcode
@@ -86,28 +95,57 @@ public struct XcodeTestSelection: Sendable, Equatable {
     }
 }
 
+/// Xcode's parallel-testing switches, as typed values instead of raw options.
+public struct XcodeParallelTesting: Sendable, Equatable {
+    /// `-parallel-testing-enabled YES|NO`; `nil` leaves the scheme's or test plan's setting.
+    public var enabled: Bool?
+    /// `-parallel-testing-worker-count`: workers per destination.
+    public var workerCount: Int?
+    /// `-maximum-parallel-testing-workers`: an upper bound when Xcode chooses the count.
+    public var maximumWorkers: Int?
+
+    public init(enabled: Bool? = nil, workerCount: Int? = nil, maximumWorkers: Int? = nil) {
+        self.enabled = enabled
+        self.workerCount = workerCount
+        self.maximumWorkers = maximumWorkers
+    }
+
+    var options: [XcodeBuildOption] {
+        (enabled.map { [.parallelTestingEnabled($0 ? "YES" : "NO")] } ?? [])
+            + (workerCount.map { [.parallelTestingWorkerCount(String($0))] } ?? [])
+            + (maximumWorkers.map { [.maximumParallelTestingWorkers(String($0))] } ?? [])
+    }
+}
+
 /// Runs XCTest and Swift Testing bundles with `xcodebuild` and reads the result bundle.
 public struct XcodeTestRunner: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
     private let logger = Logger.forType(XcodeTestRunner.self)
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for the test command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// `xcodebuild test`, building first.
     ///
-    /// - Parameter resultBundlePath: Must not exist yet; xcodebuild refuses to overwrite one.
+    /// - Parameters:
+    ///   - resultBundlePath: Must not exist yet; xcodebuild refuses to overwrite one.
+    ///   - parallel: Parallel-testing switches appended to the request.
     public func test(
-        _ request: XcodeBuildRequest, selection: XcodeTestSelection = .init(), resultBundlePath: String
-    ) async throws
-        -> TestExecution
-    {
+        _ request: XcodeBuildRequest,
+        selection: XcodeTestSelection = .init(),
+        parallel: XcodeParallelTesting? = nil,
+        resultBundlePath: String
+    ) async throws -> TestExecution {
         var resolved = request
         resolved.resultBundlePath = resultBundlePath
-        resolved.additionalOptions += selection.options
+        resolved.additionalOptions += selection.options + (parallel?.options ?? [])
         logger.info("xcodebuild test", metadata: ["scheme": "\(request.scheme)", "bundle": "\(resultBundlePath)"])
         return try await run(XcodeBuilder(shell: shell, output: output).command(for: resolved).test(), resultBundlePath: resultBundlePath)
     }
@@ -117,13 +155,32 @@ public struct XcodeTestRunner: Sendable {
         xctestrun: String,
         destination: XcodeDestination,
         selection: XcodeTestSelection = .init(),
+        parallel: XcodeParallelTesting? = nil,
         resultBundlePath: String,
         additionalOptions: [XcodeBuildOption] = []
     ) async throws -> TestExecution {
-        logger.info("xcodebuild test-without-building", metadata: ["xctestrun": "\(xctestrun)", "bundle": "\(resultBundlePath)"])
+        try await testWithoutBuilding(
+            xctestrun: xctestrun, destinations: [destination], selection: selection, parallel: parallel,
+            resultBundlePath: resultBundlePath, additionalOptions: additionalOptions)
+    }
+
+    /// `xcodebuild test-without-building -xctestrun <file>` on several destinations at once.
+    ///
+    /// - Throws: ``MobileKitError/invalidRequest(_:)`` when `destinations` is empty.
+    public func testWithoutBuilding(
+        xctestrun: String,
+        destinations: [XcodeDestination],
+        selection: XcodeTestSelection = .init(),
+        parallel: XcodeParallelTesting? = nil,
+        resultBundlePath: String,
+        additionalOptions: [XcodeBuildOption] = []
+    ) async throws -> TestExecution {
+        logger.info(
+            "xcodebuild test-without-building",
+            metadata: ["xctestrun": "\(xctestrun)", "destinations": "\(destinations.count)", "bundle": "\(resultBundlePath)"])
         return try await testWithoutBuilding(
-            input: .xctestrun(xctestrun), destination: destination, selection: selection, resultBundlePath: resultBundlePath,
-            additionalOptions: additionalOptions)
+            input: .xctestrun(xctestrun), destinations: destinations, selection: selection, parallel: parallel,
+            resultBundlePath: resultBundlePath, additionalOptions: additionalOptions)
     }
 
     /// `xcodebuild test-without-building -testProductsPath <bundle>`, reusing the `.xctestproducts`
@@ -132,34 +189,57 @@ public struct XcodeTestRunner: Sendable {
         testProducts: String,
         destination: XcodeDestination,
         selection: XcodeTestSelection = .init(),
+        parallel: XcodeParallelTesting? = nil,
         resultBundlePath: String,
         additionalOptions: [XcodeBuildOption] = []
     ) async throws -> TestExecution {
-        logger.info("xcodebuild test-without-building", metadata: ["products": "\(testProducts)", "bundle": "\(resultBundlePath)"])
+        try await testWithoutBuilding(
+            testProducts: testProducts, destinations: [destination], selection: selection, parallel: parallel,
+            resultBundlePath: resultBundlePath, additionalOptions: additionalOptions)
+    }
+
+    /// `xcodebuild test-without-building -testProductsPath <bundle>` on several destinations at once.
+    ///
+    /// - Throws: ``MobileKitError/invalidRequest(_:)`` when `destinations` is empty.
+    public func testWithoutBuilding(
+        testProducts: String,
+        destinations: [XcodeDestination],
+        selection: XcodeTestSelection = .init(),
+        parallel: XcodeParallelTesting? = nil,
+        resultBundlePath: String,
+        additionalOptions: [XcodeBuildOption] = []
+    ) async throws -> TestExecution {
+        logger.info(
+            "xcodebuild test-without-building",
+            metadata: ["products": "\(testProducts)", "destinations": "\(destinations.count)", "bundle": "\(resultBundlePath)"])
         return try await testWithoutBuilding(
-            input: .testProductsPath(testProducts), destination: destination, selection: selection, resultBundlePath: resultBundlePath,
-            additionalOptions: additionalOptions)
+            input: .testProductsPath(testProducts), destinations: destinations, selection: selection, parallel: parallel,
+            resultBundlePath: resultBundlePath, additionalOptions: additionalOptions)
     }
 
     private func testWithoutBuilding(
         input: XcodeBuildOption,
-        destination: XcodeDestination,
+        destinations: [XcodeDestination],
         selection: XcodeTestSelection,
+        parallel: XcodeParallelTesting?,
         resultBundlePath: String,
         additionalOptions: [XcodeBuildOption]
     ) async throws -> TestExecution {
+        guard !destinations.isEmpty else {
+            throw MobileKitError.invalidRequest("test-without-building needs at least one destination")
+        }
         var xcodebuild = XcodeBuild(context: shell)
             .settingStdoutDestination(output.stdout)
             .settingStderrDestination(output.stderr)
             .option(input)
-            .option(.destination(destination.specifier))
-            .option(.resultBundlePath(resultBundlePath))
-        for option in selection.options + additionalOptions { xcodebuild = xcodebuild.option(option) }
+        for destination in destinations { xcodebuild = xcodebuild.option(.destination(destination.specifier)) }
+        xcodebuild = xcodebuild.option(.resultBundlePath(resultBundlePath))
+        for option in selection.options + (parallel?.options ?? []) + additionalOptions { xcodebuild = xcodebuild.option(option) }
         return try await run(xcodebuild.testWithoutBuilding(), resultBundlePath: resultBundlePath)
     }
 
     private func run(_ family: XcodeBuild, resultBundlePath: String) async throws -> TestExecution {
-        let (log, argv, duration) = try await execute(family)
+        let (log, argv, duration) = try await execute(family, timeout: timeout)
         guard FileManager.default.fileExists(atPath: resultBundlePath) else {
             throw TestExecutionFailure(
                 command: argv, exitCode: log.exitCode, output: log,
@@ -272,7 +352,8 @@ public enum GradleTestResults {
             runner: runner, framework: framework, source: projectDirectory, destinations: destinations,
             summary: TestSummary(
                 passed: runs.reduce(0) { $0 + $1.summary.passed }, failed: runs.reduce(0) { $0 + $1.summary.failed },
-                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, errored: runs.reduce(0) { $0 + $1.summary.errored }),
+                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, flaky: runs.reduce(0) { $0 + $1.summary.flaky },
+                errored: runs.reduce(0) { $0 + $1.summary.errored }),
             suites: runs.flatMap(\.suites), testCases: runs.flatMap(\.testCases), diagnostics: runs.flatMap(\.diagnostics))
     }
 }
@@ -282,11 +363,15 @@ public enum GradleTestResults {
 public struct GradleTestRunner: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
     private let logger = Logger.forType(GradleTestRunner.self)
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for the test command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// Runs one test task.
@@ -311,7 +396,7 @@ public struct GradleTestRunner: Sendable {
         var gradle = GradleBuilder(shell: shell, output: output).command(for: project).task(
             filters.isEmpty ? task : task.filteringTests(filters))
         if continueAfterFailure { gradle = gradle.flag(.continueAfterFailure) }
-        let (log, argv, duration) = try await execute(gradle)
+        let (log, argv, duration) = try await execute(gradle, timeout: timeout)
         let artifacts = GradleTestResults.reportDirectories(projectDirectory: project.directory, task: task.name).map(\.path)
         if let run = try await GradleTestResults.read(projectDirectory: project.directory, task: task.name, framework: framework),
             run.hasResults
@@ -343,10 +428,14 @@ public struct GradleTestRunner: Sendable {
 public struct SwiftPMTestRunner: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init()) {
+    /// - Parameter timeout: Limit for the test command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), timeout: Duration? = nil) {
         self.shell = shell
         self.output = output
+        self.timeout = timeout
     }
 
     /// - Parameter outputDirectory: Receives `events.jsonl`, `xctest.xml`, and attachments.
@@ -374,7 +463,7 @@ public struct SwiftPMTestRunner: Sendable {
                 filter: filter, skip: skip, xunit: directory.appendingPathComponent("xctest.xml").path, workers: workers
             )
             .env(environment)
-        let (log, argv, duration) = try await execute(family)
+        let (log, argv, duration) = try await execute(family, timeout: timeout)
         guard FileManager.default.fileExists(atPath: events), let run = try? SwiftEventParser().parse(path: events), run.hasResults else {
             throw TestExecutionFailure(command: argv, exitCode: log.exitCode, output: log, reason: "swift test reported no test outcomes")
         }
@@ -390,10 +479,16 @@ public struct SwiftPMTestRunner: Sendable {
 public struct FlutterTestRunner: Sendable {
     private let shell: ShellContext
     private let executable: (path: String, prefix: [String])
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init(), executable: (path: String, prefix: [String]) = ("flutter", [])) {
+    /// - Parameter timeout: Limit for the test command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(
+        shell: ShellContext = .init(), executable: (path: String, prefix: [String]) = ("flutter", []), timeout: Duration? = nil
+    ) {
         self.shell = shell
         self.executable = executable
+        self.timeout = timeout
     }
 
     private func flutter(_ directory: String) -> Flutter {
@@ -419,7 +514,7 @@ public struct FlutterTestRunner: Sendable {
     }
 
     private func parse(_ family: Flutter, destination: TestDestination) async throws -> TestExecution {
-        let (log, argv, duration) = try await execute(family)
+        let (log, argv, duration) = try await execute(family, timeout: timeout)
         let parsed = try await FlutterMachineOutputParser().parse(machineOutput: log.stdout)
         guard parsed.hasResults else {
             throw TestExecutionFailure(command: argv, exitCode: log.exitCode, output: log, reason: "flutter test reported no test outcomes")
@@ -440,9 +535,13 @@ public struct FlutterTestRunner: Sendable {
 /// Runs a JavaScript project's test script, reading Jest's JSON report when the script is Jest.
 public struct JestTestRunner: Sendable {
     private let shell: ShellContext
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init()) {
+    /// - Parameter timeout: Limit for the test command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(shell: ShellContext = .init(), timeout: Duration? = nil) {
         self.shell = shell
+        self.timeout = timeout
     }
 
     /// Runs `package.json`'s `script` (default `test`) with `--json --outputFile`.
@@ -466,7 +565,7 @@ public struct JestTestRunner: Sendable {
         }
         let clock = ContinuousClock()
         let start = clock.now
-        let log = try await project.run(script: script, arguments: arguments)
+        let log = try await project.run(script: script, arguments: arguments, timeout: timeout)
         let elapsed = (clock.now - start).components
         let argv = [project.packageManager.rawValue, "run", script, "--"] + arguments
         guard FileManager.default.fileExists(atPath: report.path),
@@ -488,11 +587,17 @@ public struct BazelTestRunner: Sendable {
     private let shell: ShellContext
     private let output: BuildOutput
     private let executablePath: String
+    private let timeout: Duration?
 
-    public init(shell: ShellContext = .init(), output: BuildOutput = .init(), executablePath: String = "bazel") {
+    /// - Parameter timeout: Limit for the `bazel test` command; exceeding it throws
+    ///   ``MobileKitError/timedOut(operation:seconds:)``. `nil` waits indefinitely.
+    public init(
+        shell: ShellContext = .init(), output: BuildOutput = .init(), executablePath: String = "bazel", timeout: Duration? = nil
+    ) {
         self.shell = shell
         self.output = output
         self.executablePath = executablePath
+        self.timeout = timeout
     }
 
     /// - Parameter testFilter: `--test_filter`, passed to each test runner.
@@ -509,7 +614,7 @@ public struct BazelTestRunner: Sendable {
             .test(targets)
             .options(options + [.buildEventJSONFile(events.path)] + (testFilter.map { [.testFilter($0)] } ?? []))
             .workingDirectory(workspace)
-        let (log, argv, duration) = try await execute(family)
+        let (log, argv, duration) = try await execute(family, timeout: timeout)
         let stream = BuildEventStream.parse((try? String(contentsOf: events, encoding: .utf8)) ?? "")
         // The last attempt of each test decides its outcome; earlier attempts are retries.
         let finalAttempts = Dictionary(grouping: stream.tests, by: { "\($0.label)#\($0.run)#\($0.shard)" })

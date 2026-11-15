@@ -142,6 +142,45 @@ struct GradleBuilderTests {
         #expect(seen.withLock { $0 }.suffix(2) == [":app:assembleFreeDebug", ":app:assembleFreeDebugAndroidTest"])
         #expect(outcome.resultLine == "BUILD SUCCESSFUL in 3s")
     }
+
+    @Test("A builder timeout reaches the command and an exceeded one is a timedOut error")
+    func buildTimeout() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let applied = Mutex<Duration?>(nil)
+        let executor = MockExecutor { command, _ in
+            applied.withLock { $0 = command.timeoutOverride }
+            return ShellOutput(stdout: "BUILD SUCCESSFUL in 3s\n", exitCode: 0)
+        }
+        _ = try await GradleBuilder(shell: ShellContext(executor: executor), timeout: .seconds(45))
+            .assemble(module: "app", in: GradleProject(directory: scratch.url.path))
+        #expect(applied.withLock { $0 } == .seconds(45))
+
+        let hung = MockExecutor { command, _ in
+            throw ShellError.timeout(
+                command: CommandSnapshot(command), duration: .seconds(45), partialOutput: ShellOutput(stdout: "", exitCode: 0))
+        }
+        do {
+            _ = try await GradleBuilder(shell: ShellContext(executor: hung), timeout: .seconds(45))
+                .assemble(module: "app", in: GradleProject(directory: scratch.url.path))
+            Issue.record("A hung build must not look like a finished one")
+        } catch MobileKitError.timedOut(_, let seconds) {
+            #expect(seconds == 45)
+        }
+    }
+
+    @Test("Warnings written to stderr are counted with those on stdout")
+    func warningsFromStderr() async throws {
+        let executor = MockExecutor { _, _ in
+            ShellOutput(
+                stdout: "warning: deprecated\nBUILD SUCCESSFUL in 3s\n", stderr: "w: A.kt:1 unused\nw: B.kt:2 unused\n", exitCode: 0)
+        }
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let outcome = try await GradleBuilder(shell: ShellContext(executor: executor))
+            .assemble(module: "app", in: GradleProject(directory: scratch.url.path))
+        #expect(outcome.warnings == 3)
+    }
 }
 
 @Suite("Framework builders")

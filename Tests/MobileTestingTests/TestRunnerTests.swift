@@ -3,6 +3,7 @@ import GradleKit
 import MobileBuild
 import MobileCore
 import SwiftyShell
+import Synchronization
 import TestCommons
 import Testing
 
@@ -41,6 +42,67 @@ struct TestRunnerTests {
         }
     }
 
+    @Test("test-without-building passes every destination and the typed parallel-testing options")
+    func xcodeMultipleDestinationsAndParallel() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let seen = Mutex<[String]>([])
+        let executor = MockExecutor { command, _ in
+            seen.withLock { $0 = command.arguments }
+            return ShellOutput(stdout: "", stderr: "", exitCode: 65)
+        }
+        let runner = XcodeTestRunner(shell: ShellContext(executor: executor))
+        do {
+            _ = try await runner.testWithoutBuilding(
+                xctestrun: "/tmp/App.xctestrun", destinations: [.simulator(udid: "ONE"), .simulator(udid: "TWO")],
+                parallel: XcodeParallelTesting(enabled: true, workerCount: 3, maximumWorkers: 5),
+                resultBundlePath: scratch.url.appendingPathComponent("r.xcresult").path)
+            Issue.record("A run with no result bundle is a failure")
+        } catch is TestExecutionFailure {}
+        let arguments = seen.withLock { $0 }
+        let pairs = Array(zip(arguments, arguments.dropFirst()))
+        let destinations = pairs.filter { $0.0 == "-destination" }.map(\.1)
+        #expect(destinations == ["platform=iOS Simulator,id=ONE", "platform=iOS Simulator,id=TWO"])
+        #expect(pairs.contains { $0 == "-parallel-testing-enabled" && $1 == "YES" })
+        #expect(pairs.contains { $0 == "-parallel-testing-worker-count" && $1 == "3" })
+        #expect(pairs.contains { $0 == "-maximum-parallel-testing-workers" && $1 == "5" })
+    }
+
+    @Test("test-without-building refuses an empty destination list")
+    func xcodeNoDestinations() async throws {
+        let runner = XcodeTestRunner(shell: ShellContext(executor: MockExecutor { _, _ in ShellOutput(stdout: "", exitCode: 0) }))
+        await #expect(throws: MobileKitError.self) {
+            _ = try await runner.testWithoutBuilding(
+                xctestrun: "/tmp/App.xctestrun", destinations: [], resultBundlePath: "/tmp/never.xcresult")
+        }
+    }
+
+    @Test("A runner timeout reaches the command and an exceeded one is a timedOut error")
+    func runnerTimeouts() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let applied = Mutex<Duration?>(nil)
+        let executor = MockExecutor { command, _ in
+            applied.withLock { $0 = command.timeoutOverride }
+            return ShellOutput(stdout: "BUILD FAILED\n", exitCode: 1)
+        }
+        let runner = GradleTestRunner(shell: ShellContext(executor: executor), timeout: .seconds(90))
+        _ = try? await runner.run(task: GradleTask.custom(":app:test"), in: GradleProject(directory: scratch.url.path))
+        #expect(applied.withLock { $0 } == .seconds(90))
+
+        let hung = MockExecutor { command, _ in
+            throw ShellError.timeout(
+                command: CommandSnapshot(command), duration: .seconds(90), partialOutput: ShellOutput(stdout: "", exitCode: 0))
+        }
+        do {
+            _ = try await GradleTestRunner(shell: ShellContext(executor: hung), timeout: .seconds(90))
+                .run(task: GradleTask.custom(":app:test"), in: GradleProject(directory: scratch.url.path))
+            Issue.record("A hung command must not look like a finished run")
+        } catch MobileKitError.timedOut(_, let seconds) {
+            #expect(seconds == 90)
+        }
+    }
+
     @Test("Gradle results come from the task's JUnit XML; failures are a result, not an error")
     func gradleReadsJUnit() async throws {
         let scratch = try TemporaryDirectory()
@@ -61,6 +123,27 @@ struct TestRunnerTests {
         #expect(execution.run.summary.passed == 1)
         #expect(execution.run.summary.failed == 1)
         #expect(execution.artifacts.count == 1)
+    }
+
+    @Test("Merged Gradle report directories sum flaky tests with the other counts")
+    func gradleMergedFlakyCount() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let flaky = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <testsuite name="com.example.FlakyTest" tests="2" skipped="0" failures="1" errors="0" time="0.2">
+              <testcase name="sometimes" classname="com.example.FlakyTest" time="0.1"><failure message="boom">trace</failure></testcase>
+              <testcase name="sometimes" classname="com.example.FlakyTest" time="0.1"/>
+            </testsuite>
+            """
+        for module in ["app", "lib"] {
+            let reports = scratch.url.appending(path: "\(module)/build/test-results/test")
+            try FileManager.default.createDirectory(at: reports, withIntermediateDirectories: true)
+            try Data(flaky.utf8).write(to: reports.appending(path: "TEST-com.example.FlakyTest.xml"))
+        }
+        let run = try #require(await GradleTestResults.read(projectDirectory: scratch.url.path, task: "test"))
+        #expect(run.summary.flaky == 2)
+        #expect(run.summary.passed == 2)
     }
 
     @Test("NO-SOURCE for the test task is a not-executed run, never a pass")

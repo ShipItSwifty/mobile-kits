@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 import MobileCore
 import SwiftyShell
 
@@ -177,21 +178,28 @@ public struct GradleLogSummary: Sendable, Equatable {
 func runBuild<Family: RunnableCommandFamily>(
     _ family: Family,
     backend: BuildBackend,
+    timeout: Duration? = nil,
     summarize: (String) -> String? = { _ in nil }
 ) async throws -> (ShellOutput, Double) {
-    let command = family.command()
+    let logger = Logger.forType(BuildFailure.self)
+    let command = family.command().timeout(timeout)
     let argv = [command.executableName] + command.arguments
     let clock = ContinuousClock()
     let start = clock.now
+    logger.info("Running build command", metadata: ["backend": "\(backend.rawValue)", "arguments": "\(command.arguments.count)"])
     do {
         let output = try await command.outputLimit(0).run(in: family.context)
         let elapsed = (clock.now - start).components
-        return (output, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        logger.info("Build command finished", metadata: ["backend": "\(backend.rawValue)", "seconds": "\(seconds)"])
+        return (output, seconds)
     } catch let ShellError.exitFailure(_, output) {
+        logger.error("Build command failed", metadata: ["backend": "\(backend.rawValue)", "exitCode": "\(output.exitCode)"])
         throw BuildFailure(
             backend: backend, command: argv, exitCode: output.exitCode, output: output,
             summary: summarize(output.stdout + "\n" + output.stderr))
     } catch let error as ShellError {
+        logger.error("Build command did not finish", metadata: ["backend": "\(backend.rawValue)", "error": "\(error)"])
         throw ToolRunner.map(error, argv: argv)
     }
 }

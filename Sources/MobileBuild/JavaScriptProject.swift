@@ -80,7 +80,9 @@ public struct JavaScriptProject: Sendable {
     /// output whatever the exit status: a failing test script is a result, not an error.
     ///
     /// - Throws: ``MobileKitError/notFound(_:)`` when `package.json` has no such script.
-    public func run(script name: String, arguments: [String] = [], environment: [String: String] = [:]) async throws -> ShellOutput {
+    public func run(
+        script name: String, arguments: [String] = [], environment: [String: String] = [:], timeout: Duration? = nil
+    ) async throws -> ShellOutput {
         try await installDependenciesIfNeeded()
         // Refuse only a readable package.json that lacks the script; an unreadable one is left to
         // the package manager, whose error names the actual problem.
@@ -92,6 +94,7 @@ public struct JavaScriptProject: Sendable {
             .workingDirectory(root)
             .env(environment)
             .outputLimit(0)
+            .timeout(timeout)
         do {
             return try await command.run(in: shell)
         } catch let ShellError.exitFailure(_, output) {
