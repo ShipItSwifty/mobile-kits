@@ -52,7 +52,7 @@ public struct EmulatorBootOptions: Sendable, Equatable {
 
 /// An emulator process started by ``AndroidEmulatorManager/start(avd:options:logPath:)``.
 ///
-/// The caller owns it: ``AndroidEmulatorManager/stop(_:)`` stops only emulators this handle
+/// The caller owns it: `AndroidEmulatorManager.stop` stops only emulators this handle
 /// describes, never one that was already running.
 public struct EmulatorInstance: Sendable, Equatable {
     public var avd: String
@@ -174,7 +174,8 @@ public struct AndroidEmulatorManager: Sendable {
     }
 
     /// Starts `avd` in its own session (so it can outlive the caller; see ``EmulatorBootOptions/attached``
-    /// to keep it a child instead) and returns once the process is launched. Call ``waitUntilBooted(_:timeout:)`` before using it.
+    /// to keep it a child instead) and returns once the process is launched. Call
+    /// ``waitUntilBooted(_:timeout:)`` before using it. Stop it with `stop(_:)` when it is no longer needed.
     ///
     /// - Parameter logPath: Where emulator output goes; `$TMPDIR/emulator-<port>.log` by default.
     public func start(

@@ -143,10 +143,10 @@ extension AndroidDeviceManager {
     }
 
     /// Starts `adb shell screenrecord <remotePath>` in the background; the file stays on the device
-    /// (`adb pull` it after ``stopRecording(on:timeout:)``). Waits up to `readinessTimeout` for
+    /// (`adb pull` it after `stopRecording`). Waits up to `readinessTimeout` for
     /// the encoder to open its output before returning, so an immediate stop can finalize it.
     ///
-    /// - Throws: ``MobileKitError/invalidRequest(_:)`` when a recording is already active on `serial`.
+    /// - Throws: `MobileKitError.invalidRequest` when a recording is already active on `serial`.
     public func startRecording(on serial: String, remotePath: String, readinessTimeout: Duration = .seconds(20)) async throws {
         guard await recordings.reserve(serial: serial) else {
             logger.error("Recording already active", metadata: ["serial": "\(serial)"])

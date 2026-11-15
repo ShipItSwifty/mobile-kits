@@ -27,9 +27,9 @@ public struct DeviceCtlResponse: Sendable, Equatable {
     /// Reads devicectl's result from the output of a finished run.
     ///
     /// A failed command still writes JSON, so a CoreDevice error is reported as
-    /// ``MobileKitError/coreDeviceFailed(_:)`` with its code. Output with no JSON at all is a
-    /// ``MobileKitError/commandFailed(command:exitCode:output:)`` on a non-zero exit, and an
-    /// ``MobileKitError/unexpectedOutput(tool:detail:)`` otherwise.
+    /// `MobileKitError.coreDeviceFailed` with its code. Output with no JSON at all is a
+    /// `MobileKitError.commandFailed` on a non-zero exit, and an
+    /// `MobileKitError.unexpectedOutput` otherwise.
     static func decode(json: String, output: ShellOutput, argv: [String]) throws -> DeviceCtlResponse {
         guard let document = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)),
             let info = document["info"]?.objectValue

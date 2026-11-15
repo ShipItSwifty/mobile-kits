@@ -39,8 +39,7 @@ extension PhysicalIOSDeviceManager {
         return (response.result["runningProcesses"]?.arrayValue ?? []).compactMap(CoreDeviceProcess.parse)
     }
 
-    /// A device's displays, whose unique ids ``captureScreenshot(on:to:displayUniqueID:)`` and
-    /// ``recordScreen(on:to:duration:codec:maskPolicy:displayUniqueID:)`` take.
+    /// A device's displays, whose unique ids `captureScreenshot` and `recordScreen` take.
     public func displays(on udid: String) async throws -> CoreDeviceDisplays {
         let response = try await perform(DeviceCtl(context: shell).displays(device: udid), operation: "info.displays", device: udid)
         return CoreDeviceDisplays.parse(response.result)

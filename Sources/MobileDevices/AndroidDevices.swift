@@ -58,6 +58,8 @@ public struct AndroidDeviceManager: Sendable {
     private let poll: (@Sendable (Duration) -> Poller)?
     let logger = Logger.forType(AndroidDeviceManager.self)
 
+    /// Creates an Android device manager using `shell` for adb commands.
+    ///
     /// - Parameters:
     ///   - recordings: Tracks running screen recordings. Defaults to the process-wide registry, so a
     ///     recording started by one manager value can be stopped by another; tests inject their own.
@@ -91,7 +93,7 @@ public struct AndroidDeviceManager: Sendable {
     /// Returns `serial` when given; otherwise the only device in state `.device`, the way `adb`
     /// without `-s` picks its target.
     ///
-    /// - Throws: ``MobileKitError/commandFailed(command:exitCode:output:)`` with adb's own messages
+    /// - Throws: `MobileKitError.commandFailed` with adb's own messages
     ///   (`no devices/emulators found`, `more than one device/emulator`) when there is not exactly one.
     public func resolveSerial(_ serial: String?) async throws -> String {
         if let serial { return serial }
@@ -163,6 +165,8 @@ public struct AndroidDeviceManager: Sendable {
 
     // MARK: - Apps
 
+    /// Installs an APK on a device. This mutates the device.
+    ///
     /// - Parameters:
     ///   - grantPermissions: `-g`, grant every runtime permission at install.
     ///   - allowTestPackages: `-t`, needed for instrumentation APKs.
@@ -181,6 +185,7 @@ public struct AndroidDeviceManager: Sendable {
         )
     }
 
+    /// Uninstalls an installed package from a device. This mutates the device.
     public func uninstall(package: String, from serial: String) async throws {
         try await ToolRunner.run(adb(serial).uninstall(package: package), timeout: .seconds(60))
     }
