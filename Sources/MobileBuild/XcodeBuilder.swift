@@ -11,14 +11,24 @@ public enum XcodeContainer: Sendable, Equatable {
     case workspace(String)
 }
 
+/// The Simulator platforms `xcodebuild -destination` can target.
+public enum XcodeSimulatorPlatform: String, Sendable, Equatable, CaseIterable {
+    case iOS = "iOS Simulator"
+    case tvOS = "tvOS Simulator"
+    case watchOS = "watchOS Simulator"
+    case visionOS = "visionOS Simulator"
+}
+
 /// Where an Xcode build runs or which platform it targets (`-destination`).
 public enum XcodeDestination: Sendable, Equatable {
     /// `generic/platform=iOS Simulator`: builds for every simulator, runs on none.
     case anyIOSSimulator
     /// `generic/platform=iOS`: device builds, for archives.
     case anyIOSDevice
-    /// One simulator by UDID.
-    case simulator(udid: String)
+    /// `generic/platform=<platform>`: builds for every simulator of `platform`, runs on none.
+    case anySimulator(XcodeSimulatorPlatform)
+    /// One simulator by UDID, of any Simulator platform (iOS unless stated).
+    case simulator(udid: String, platform: XcodeSimulatorPlatform = .iOS)
     /// One physical device by UDID.
     case device(udid: String)
     case macOS
@@ -29,7 +39,8 @@ public enum XcodeDestination: Sendable, Equatable {
         switch self {
         case .anyIOSSimulator: "generic/platform=iOS Simulator"
         case .anyIOSDevice: "generic/platform=iOS"
-        case .simulator(let udid): "platform=iOS Simulator,id=\(udid)"
+        case .anySimulator(let platform): "generic/platform=\(platform.rawValue)"
+        case .simulator(let udid, let platform): "platform=\(platform.rawValue),id=\(udid)"
         case .device(let udid): "platform=iOS,id=\(udid)"
         case .macOS: "platform=macOS"
         case .custom(let value): value

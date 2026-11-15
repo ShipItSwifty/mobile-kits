@@ -106,6 +106,19 @@ struct XcodeBuilderTestProductsTests {
     }
 }
 
+@Suite("XcodeDestination")
+struct XcodeDestinationTests {
+    @Test("Simulator destinations name their platform and default to iOS")
+    func simulatorPlatforms() {
+        #expect(XcodeDestination.simulator(udid: "U").specifier == "platform=iOS Simulator,id=U")
+        #expect(XcodeDestination.simulator(udid: "U", platform: .tvOS).specifier == "platform=tvOS Simulator,id=U")
+        #expect(XcodeDestination.simulator(udid: "U", platform: .watchOS).specifier == "platform=watchOS Simulator,id=U")
+        #expect(XcodeDestination.simulator(udid: "U", platform: .visionOS).specifier == "platform=visionOS Simulator,id=U")
+        #expect(XcodeDestination.anySimulator(.visionOS).specifier == "generic/platform=visionOS Simulator")
+        #expect(XcodeDestination.anyIOSSimulator.specifier == XcodeDestination.anySimulator(.iOS).specifier)
+    }
+}
+
 @Suite("GradleBuilder")
 struct GradleBuilderTests {
     @Test("APKs come from output-metadata.json; bundles from build/outputs/bundle")
