@@ -87,8 +87,7 @@ public struct NativeResultReader: Sendable {
         case "xcresult": return .xcresult
         case "xml": return .junit
         case "jsonl", "ndjson":
-            let text = try String(contentsOfFile: path, encoding: .utf8)
-            let isSwiftEvents = text.components(separatedBy: .newlines).prefix(10).contains {
+            let isSwiftEvents = try leadingLines(ofFileAt: url, count: 10).contains {
                 $0.contains("\"payload\"") && $0.contains("\"version\"")
             }
             return isSwiftEvents ? .swift : .flutter
@@ -96,8 +95,11 @@ public struct NativeResultReader: Sendable {
         }
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
-            let files = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []
-            return files.contains { $0.pathExtension == "xml" } ? .junit : nil
+            guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) else { return nil }
+            while let file = walker.nextObject() as? URL {
+                if file.pathExtension == "xml" { return .junit }
+            }
+            return nil
         }
         if let data = try? Data(contentsOf: url), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             object["testResults"] != nil
@@ -105,6 +107,18 @@ public struct NativeResultReader: Sendable {
             return .jest
         }
         return nil
+    }
+
+    /// The first `count` complete lines of a file, read from a bounded prefix so a large event
+    /// stream is not loaded to look at its head.
+    static func leadingLines(ofFileAt url: URL, count: Int, maxBytes: Int = 256 * 1024) throws -> [String] {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maxBytes + 1) ?? Data()
+        let truncated = data.count > maxBytes
+        var lines = String(decoding: data.prefix(maxBytes), as: UTF8.self).components(separatedBy: .newlines)
+        if truncated { lines.removeLast() }
+        return Array(lines.prefix(count))
     }
 
     /// The nearest enclosing JavaScript project (a directory with `package.json`), so offline Jest
