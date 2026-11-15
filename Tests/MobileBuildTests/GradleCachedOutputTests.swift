@@ -53,3 +53,23 @@ struct GradleCachedOutputTests {
     }
 
 }
+
+@Suite("Gradle output selection metadata")
+struct GradleOutputSelectionMetadataTests {
+    @Test("Supplied metadata decides the variant without reading the file again")
+    func usesSuppliedMetadata() {
+        let file = URL(fileURLWithPath: "/nonexistent/app/build/outputs/apk/free/debug/output-metadata.json")
+        let selection = GradleOutputSelection(
+            tasks: [GradleTask.custom(":app:assembleFreeDebug")], module: "/nonexistent/app", root: "/nonexistent")
+        #expect(selection.includes(file, fresh: false, metadata: ["variantName": "freeDebug"]))
+        #expect(!selection.includes(file, fresh: false, metadata: ["variantName": "paidRelease"]))
+    }
+
+    @Test("APK paths resolve next to the metadata file from parsed content")
+    func apkPathsFromParsedMetadata() {
+        let url = URL(fileURLWithPath: "/p/app/build/outputs/apk/debug/output-metadata.json")
+        let paths = GradleBuilder.apkPaths(in: ["elements": [["outputFile": "app-debug.apk"]]], next: url)
+        #expect(paths == ["/p/app/build/outputs/apk/debug/app-debug.apk"])
+        #expect(GradleBuilder.apkPaths(in: nil, next: url).isEmpty)
+    }
+}
