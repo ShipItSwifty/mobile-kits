@@ -77,13 +77,15 @@ public struct GradleBuilder: Sendable {
         logger.info("Gradle build", metadata: ["tasks": "\(tasks.map(\.name))", "project": "\(project.directory)"])
         let started = Date()
         let family = command(for: project).tasks((clean ? [.clean] : []) + tasks)
-        let (log, duration) = try await runBuild(family, backend: .gradle, timeout: timeout) { GradleLogSummary.parse($0).resultLine }
+        let (log, duration) = try await runBuild(family, backend: .gradle, timeout: timeout) {
+            GradleLogSummary.parse(stdout: $0.stdout, stderr: $0.stderr).resultLine
+        }
         let directory = URL(
             fileURLWithPath: project.directory,
             relativeTo: URL(fileURLWithPath: shell.workingDirectory ?? FileManager.default.currentDirectoryPath, isDirectory: true)
         ).standardizedFileURL.path
         let artifacts = Self.outputs(projectDirectory: directory, modules: modules, modifiedSince: started, tasks: tasks)
-        let summary = GradleLogSummary.parse(log.stdout + "\n" + log.stderr)
+        let summary = GradleLogSummary.parse(stdout: log.stdout, stderr: log.stderr)
         logger.info("Gradle build finished", metadata: ["result": "\(summary.resultLine ?? "")", "artifacts": "\(artifacts.count)"])
         return BuildOutcome(
             backend: .gradle, artifacts: artifacts, warnings: summary.warningCount, resultLine: summary.resultLine,

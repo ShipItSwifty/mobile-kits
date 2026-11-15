@@ -405,8 +405,10 @@ public struct GradleTestRunner: Sendable {
                 run: run, status: .completed, exitCode: log.exitCode, output: log, command: argv, artifacts: artifacts,
                 durationSeconds: duration)
         }
-        let combined = log.stdout + "\n" + log.stderr
-        if log.exitCode == 0, GradleTestResults.taskHadNothingToRun(combined, task: task.name) {
+        if log.exitCode == 0,
+            GradleTestResults.taskHadNothingToRun(log.stdout, task: task.name)
+                || GradleTestResults.taskHadNothingToRun(log.stderr, task: task.name)
+        {
             let empty = ParsedTestRun(
                 runner: .gradle, framework: framework, source: "gradle", summary: .init(),
                 diagnostics: [.init(severity: .info, message: "Gradle reported NO-SOURCE/SKIPPED: the test task had no tests to run")])
@@ -418,7 +420,8 @@ public struct GradleTestRunner: Sendable {
             command: argv, exitCode: log.exitCode, output: log,
             reason: log.exitCode == 0
                 ? "Gradle task '\(task.name)' exited 0 but wrote no JUnit XML"
-                : GradleLogSummary.parse(combined).resultLine ?? "Gradle task '\(task.name)' failed before reporting tests")
+                : GradleLogSummary.parse(stdout: log.stdout, stderr: log.stderr).resultLine
+                    ?? "Gradle task '\(task.name)' failed before reporting tests")
     }
 }
 
