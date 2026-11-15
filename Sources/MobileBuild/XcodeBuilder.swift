@@ -37,6 +37,18 @@ public enum XcodeDestination: Sendable, Equatable {
     }
 }
 
+/// How ``XcodeBuilder`` finds the products a build wrote.
+public enum XcodeProductDiscovery: Sendable, Equatable {
+    /// Runs `xcodebuild -showBuildSettings -json` after the build (resolves packages again and can
+    /// take several seconds).
+    case readBuildSettings
+    /// Reports no products; for callers that already know where the build writes.
+    case skip
+    /// Reads products from settings the caller already has, such as an earlier
+    /// ``XcodeBuilder/buildSettings(for:)`` result for the same request.
+    case settings([XcodeTargetSettings])
+}
+
 /// What to build with `xcodebuild`.
 public struct XcodeBuildRequest: Sendable {
     public var container: XcodeContainer?
@@ -178,24 +190,33 @@ public struct XcodeBuilder: Sendable {
     }
 
     /// `xcodebuild build`, returning the built `.app` bundles and dSYMs.
-    public func build(_ request: XcodeBuildRequest, clean: Bool = false) async throws -> BuildOutcome {
+    ///
+    /// - Parameter productDiscovery: How to find the products; ``XcodeProductDiscovery/readBuildSettings``
+    ///   unless the caller already has the settings or does not need the products.
+    public func build(
+        _ request: XcodeBuildRequest, clean: Bool = false, productDiscovery: XcodeProductDiscovery = .readBuildSettings
+    ) async throws -> BuildOutcome {
         logger.info("xcodebuild build", metadata: ["scheme": "\(request.scheme)", "configuration": "\(request.configuration)"])
         let (log, duration) = try await runBuild(command(for: request).build(clean: clean), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
-        let products = try await products(for: request)
+        let products = try await products(for: request, discovery: productDiscovery)
         return outcome(log, duration: duration, artifacts: products.artifacts, diagnostics: products.diagnostics)
     }
 
     /// `xcodebuild build-for-testing`, returning the products plus the `.xctestrun` files that
     /// `test-without-building` runs.
-    public func buildForTesting(_ request: XcodeBuildRequest) async throws -> BuildOutcome {
+    ///
+    /// - Parameter productDiscovery: How to find the products and the `.xctestrun` directory.
+    public func buildForTesting(
+        _ request: XcodeBuildRequest, productDiscovery: XcodeProductDiscovery = .readBuildSettings
+    ) async throws -> BuildOutcome {
         logger.info("xcodebuild build-for-testing", metadata: ["scheme": "\(request.scheme)"])
         let started = Date()
         let (log, duration) = try await runBuild(command(for: request).buildForTesting(), backend: .xcodebuild, timeout: timeout) {
             XcodeBuildLogSummary.parse($0).resultLine
         }
-        let products = try await products(for: request)
+        let products = try await products(for: request, discovery: productDiscovery)
         let testRuns = Self.xctestrunFiles(in: products.productsDirectory, modifiedSince: started)
         return outcome(
             log, duration: duration, artifacts: products.artifacts + testRuns.map { BuildArtifact(kind: .xctestrun, path: $0) },
@@ -281,14 +302,22 @@ public struct XcodeBuilder: Sendable {
         var diagnostics: [String]
     }
 
-    private func products(for request: XcodeBuildRequest) async throws -> Products {
+    private func products(for request: XcodeBuildRequest, discovery: XcodeProductDiscovery) async throws -> Products {
         let targets: [XcodeTargetSettings]
-        do {
-            targets = try await buildSettings(for: request)
-        } catch {
-            logger.error("Could not read build settings", metadata: ["scheme": "\(request.scheme)", "error": "\(error)"])
-            return Products(
-                artifacts: [], productsDirectory: nil, diagnostics: ["Could not read build settings: \(error.localizedDescription)"])
+        switch discovery {
+        case .skip:
+            logger.debug("Skipping product discovery", metadata: ["scheme": "\(request.scheme)"])
+            return Products(artifacts: [], productsDirectory: nil, diagnostics: [])
+        case .settings(let known):
+            targets = known
+        case .readBuildSettings:
+            do {
+                targets = try await buildSettings(for: request)
+            } catch {
+                logger.error("Could not read build settings", metadata: ["scheme": "\(request.scheme)", "error": "\(error)"])
+                return Products(
+                    artifacts: [], productsDirectory: nil, diagnostics: ["Could not read build settings: \(error.localizedDescription)"])
+            }
         }
         var artifacts: [BuildArtifact] = []
         for target in targets {
