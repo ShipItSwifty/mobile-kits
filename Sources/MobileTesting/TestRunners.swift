@@ -127,7 +127,7 @@ public struct XcodeTestRunner: Sendable {
     }
 
     /// `xcodebuild test-without-building -testProductsPath <bundle>`, reusing the `.xctestproducts`
-    /// bundle ``XcodeBuilder/buildForTesting(_:testProductsPath:)`` wrote.
+    /// bundle `XcodeBuilder.buildForTesting` wrote.
     public func testWithoutBuilding(
         testProducts: String,
         destination: XcodeDestination,
@@ -272,7 +272,8 @@ public enum GradleTestResults {
             runner: runner, framework: framework, source: projectDirectory, destinations: destinations,
             summary: TestSummary(
                 passed: runs.reduce(0) { $0 + $1.summary.passed }, failed: runs.reduce(0) { $0 + $1.summary.failed },
-                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, errored: runs.reduce(0) { $0 + $1.summary.errored }),
+                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, flaky: runs.reduce(0) { $0 + $1.summary.flaky },
+                errored: runs.reduce(0) { $0 + $1.summary.errored }),
             suites: runs.flatMap(\.suites), testCases: runs.flatMap(\.testCases), diagnostics: runs.flatMap(\.diagnostics))
     }
 }

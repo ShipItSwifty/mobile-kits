@@ -132,7 +132,7 @@ struct GradleBuilderTests {
         let seen = Mutex<[String]>([])
         let executor = MockExecutor { command, _ in
             seen.withLock { $0 = command.arguments }
-            return ShellOutput(stdout: "BUILD SUCCESSFUL in 3s\n", exitCode: 0)
+            return ShellOutput(stdout: "BUILD SUCCESSFUL in 3s\n", stderr: "w: A.kt:1 unused\n", exitCode: 0)
         }
         let scratch = try TemporaryDirectory()
         defer { try? scratch.remove() }
@@ -141,6 +141,7 @@ struct GradleBuilderTests {
                 module: "app", variant: "debug", flavor: "free", includeAndroidTest: true, in: GradleProject(directory: scratch.url.path))
         #expect(seen.withLock { $0 }.suffix(2) == [":app:assembleFreeDebug", ":app:assembleFreeDebugAndroidTest"])
         #expect(outcome.resultLine == "BUILD SUCCESSFUL in 3s")
+        #expect(outcome.warnings == 1)
     }
 }
 

@@ -79,7 +79,7 @@ public struct GradleBuilder: Sendable {
             relativeTo: URL(fileURLWithPath: shell.workingDirectory ?? FileManager.default.currentDirectoryPath, isDirectory: true)
         ).standardizedFileURL.path
         let artifacts = Self.outputs(projectDirectory: directory, modules: modules, modifiedSince: started, tasks: tasks)
-        let summary = GradleLogSummary.parse(log.stdout)
+        let summary = GradleLogSummary.parse(log.stdout + "\n" + log.stderr)
         logger.info("Gradle build finished", metadata: ["result": "\(summary.resultLine ?? "")", "artifacts": "\(artifacts.count)"])
         return BuildOutcome(
             backend: .gradle, artifacts: artifacts, warnings: summary.warningCount, resultLine: summary.resultLine,

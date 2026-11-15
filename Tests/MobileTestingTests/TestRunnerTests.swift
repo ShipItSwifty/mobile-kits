@@ -63,6 +63,24 @@ struct TestRunnerTests {
         #expect(execution.artifacts.count == 1)
     }
 
+    @Test("Merged Gradle reports retain flaky counts without changing test identities")
+    func gradleMergedFlakyCounts() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let fixture = Self.fixtures.appending(path: "gradle-test-retry/build/test-results/test/TEST-probe.ProbeTest.xml")
+        let data = try Data(contentsOf: fixture)
+        for module in ["app", "lib"] {
+            let reports = scratch.url.appending(path: "\(module)/build/test-results/test")
+            try FileManager.default.createDirectory(at: reports, withIntermediateDirectories: true)
+            try data.write(to: reports.appending(path: "TEST-probe.ProbeTest.xml"))
+        }
+
+        let merged = try await GradleTestResults.read(projectDirectory: scratch.url.path, task: "test")
+        let run = try #require(merged)
+        #expect(run.summary.flaky == 2)
+        #expect(run.testCases.allSatisfy { !$0.stableID.hasPrefix("input-") })
+    }
+
     @Test("NO-SOURCE for the test task is a not-executed run, never a pass")
     func gradleNoSource() async throws {
         let scratch = try TemporaryDirectory()
