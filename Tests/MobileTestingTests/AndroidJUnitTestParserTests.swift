@@ -8,6 +8,37 @@ import Testing
 @Suite("AndroidJUnitTestParser")
 struct AndroidJUnitTestParserTests {
 
+    @Test("A large single report keeps every case in its own suite and counts every status once")
+    func largeReportGroupsSuites() async throws {
+        let scratch = try TemporaryDirectory(prefix: "AndroidJUnitTestParserLarge")
+        defer { try? scratch.remove() }
+        let directory = scratch.url.appendingPathComponent("app/build/test-results/test", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suiteCount = 40
+        let casesPerSuite = 150
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n"
+        for suite in 0..<suiteCount {
+            xml += "<testsuite name=\"com.example.Suite\(suite)\" tests=\"\(casesPerSuite)\" skipped=\"0\" failures=\"1\" errors=\"0\">\n"
+            for index in 0..<casesPerSuite {
+                let failure = index == 0 ? "<failure message=\"boom\">trace</failure>" : ""
+                xml += "<testcase name=\"case\(index)\" classname=\"com.example.Suite\(suite)\" time=\"0.001\">\(failure)</testcase>\n"
+            }
+            xml += "</testsuite>\n"
+        }
+        xml += "</testsuites>\n"
+        try Data(xml.utf8).write(to: directory.appendingPathComponent("TEST-all.xml"))
+
+        let run = try await AndroidJUnitTestParser().parse(reportDirectory: directory.path, identityRoot: scratch.url.path)
+        #expect(run.testCases.count == suiteCount * casesPerSuite)
+        #expect(run.summary.failed == suiteCount)
+        #expect(run.summary.passed == suiteCount * (casesPerSuite - 1))
+        #expect(run.suites.count == suiteCount)
+        #expect(run.suites.allSatisfy { $0.testCaseIDs.count == casesPerSuite })
+        #expect(Set(run.suites.flatMap(\.testCaseIDs)).count == suiteCount * casesPerSuite)
+        #expect(run.testCases.first?.metadata?["gradle_task"] == "test")
+        #expect(run.testCases.first?.metadata?["module"] == "app")
+    }
+
     @Test("Parses Gradle JUnit XML files into normalized suites and test cases")
     func parsesJUnitDirectory() async throws {
         let scratch = try TemporaryDirectory(prefix: "AndroidJUnitTestParser")

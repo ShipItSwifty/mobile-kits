@@ -50,6 +50,8 @@ public struct AndroidJUnitTestParser: Sendable {
         var declaredFailed = 0
         var declaredErrors = 0
         var declaredSkipped = 0
+        var seenDestinations = Set<TestDestination>()
+        var seenSuites = Set<String>()
         for file in files {
             try Task.checkCancellation()
             let delegate = JUnitResultDelegate()
@@ -76,11 +78,16 @@ public struct AndroidJUnitTestParser: Sendable {
             // first keeps the plain ID so a one-test rerun still lines up, later ones get `#<n>`.
             let folded = Self.fold(delegate.cases)
             var ids: [String] = []
+            ids.reserveCapacity(folded.count)
+            var idsBySuite: [String?: [String]] = [:]
             for entry in folded {
-                ids.append(
+                let id =
                     "junit-case:\(scope):\(entry.item.selector)"
-                        + ((entry.occurrence?.index ?? 1) > 1 ? "#\(entry.occurrence?.index ?? 1)" : ""))
+                    + ((entry.occurrence?.index ?? 1) > 1 ? "#\(entry.occurrence?.index ?? 1)" : "")
+                ids.append(id)
+                idsBySuite[entry.item.suite, default: []].append(id)
             }
+            let scopeMetadata = Self.scopeMetadata(scope: scope)
             // Declared totals count every attempt; restate them for the folded view so a recovered test is not
             // still counted as a failure.
             let rawCounts = Self.counts(delegate.cases.map(\.status))
@@ -93,12 +100,12 @@ public struct AndroidJUnitTestParser: Sendable {
                 let item = entry.item
                 let suiteID = "junit-suite:\(scope):\(item.suite ?? "tests")"
                 let selector = item.selector
-                var metadata = Self.metadata(scope: scope, item: item)
+                var metadata = Self.metadata(scopeMetadata, item: item)
                 // Where it ran: given by the caller, or read from the Gradle task and device that wrote the report.
                 let placed: TestDestination? =
                     destination
                     ?? metadata["gradle_task"].map { TestDestination.gradle(task: $0, device: metadata["device"]) }
-                if let placed, !destinations.contains(placed) { destinations.append(placed) }
+                if let placed, seenDestinations.insert(placed).inserted { destinations.append(placed) }
                 if let occurrence = entry.occurrence { metadata["occurrence"] = "\(occurrence.index)/\(occurrence.total)" }
                 cases.append(
                     ParsedTestCase(
@@ -108,22 +115,24 @@ public struct AndroidJUnitTestParser: Sendable {
                         rerunSelector: Self.rerunSelector(selector, runner: runner, framework: framework, destination: placed),
                         metadata: metadata, stackTrace: item.stack, attempts: 1 + item.retries,
                         totalDurationSeconds: item.retries > 0 ? item.totalDuration : nil, destinationID: placed?.id))
-                if !suites.contains(where: { $0.stableID == suiteID }) {
+                if seenSuites.insert(suiteID).inserted {
                     suites.append(
                         ParsedTestSuite(
                             name: item.suite ?? "tests", stableID: suiteID, file: file.path,
-                            testCaseIDs: folded.enumerated().filter { $0.element.item.suite == item.suite }.map { ids[$0.offset] }))
+                            testCaseIDs: idsBySuite[item.suite] ?? []))
                 }
             }
             if !delegate.output.isEmpty { diagnostics.append(.init(severity: .info, message: delegate.output, source: file.path)) }
         }
-        let flakyCount = cases.filter { $0.metadata?["flaky"] == "true" }.count
+        var flakyCount = 0
+        for parsed in cases where parsed.metadata?["flaky"] == "true" { flakyCount += 1 }
+        let found = Self.counts(cases.map(\.status))
         let summary = TestSummary(
-            passed: max(declaredPassed, cases.filter { $0.status == .passed }.count),
-            failed: max(declaredFailed, cases.filter { $0.status == .failed }.count),
-            skipped: max(declaredSkipped, cases.filter { $0.status == .skipped }.count),
+            passed: max(declaredPassed, found.passed),
+            failed: max(declaredFailed, found.failed),
+            skipped: max(declaredSkipped, found.skipped),
             flaky: flakyCount,
-            errored: max(declaredErrors, cases.filter { $0.status == .errored }.count))
+            errored: max(declaredErrors, found.errored))
         // The `max` above keeps a report that omits passing testcases from under-counting; a disagreement is still
         // worth surfacing rather than hiding.
         let declaredTotal = declaredPassed + declaredFailed + declaredErrors + declaredSkipped
@@ -190,15 +199,25 @@ extension AndroidJUnitTestParser {
     }
 
     fileprivate static func counts(_ statuses: [TestCaseStatus]) -> (passed: Int, failed: Int, errored: Int, skipped: Int) {
-        (
-            statuses.filter { $0 == .passed }.count, statuses.filter { $0 == .failed }.count,
-            statuses.filter { $0 == .errored }.count, statuses.filter { $0 == .skipped }.count
-        )
+        var passed = 0
+        var failed = 0
+        var errored = 0
+        var skipped = 0
+        for status in statuses {
+            switch status {
+            case .passed: passed += 1
+            case .failed: failed += 1
+            case .errored: errored += 1
+            case .skipped: skipped += 1
+            default: break
+            }
+        }
+        return (passed, failed, errored, skipped)
     }
 
     /// Where a result came from, derived from the report's location and the properties AGP writes for
     /// connected runs. Only evidence that is actually present is recorded.
-    fileprivate static func metadata(scope: String, item: JUnitResultDelegate.Case) -> [String: String] {
+    fileprivate static func scopeMetadata(scope: String) -> [String: String] {
         var metadata = ["report": scope]
         let parts = scope.split(separator: "/").map(String.init)
         if let build = parts.firstIndex(of: "build"), build > 0 { metadata["module"] = parts[..<build].joined(separator: "/") }
@@ -207,6 +226,12 @@ extension AndroidJUnitTestParser {
         } else if parts.contains("androidTest-results") {
             metadata["gradle_task"] = "connected"
         }
+        return metadata
+    }
+
+    /// The per-file ``scopeMetadata(scope:)`` plus what one test case reports about itself.
+    fileprivate static func metadata(_ scopeMetadata: [String: String], item: JUnitResultDelegate.Case) -> [String: String] {
+        var metadata = scopeMetadata
         for key in ["device", "flavor", "project"] {
             if let value = item.properties[key], !value.isEmpty { metadata[key] = value }
         }
