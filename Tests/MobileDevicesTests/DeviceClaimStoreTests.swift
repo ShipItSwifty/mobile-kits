@@ -130,6 +130,50 @@ struct DeviceClaimStoreTests {
         #expect(encoded.contains(#""createdAt" : "2099-01-01T00:00:00.123Z""#))
     }
 
+    @Test("Dates are written and read exactly as ISO8601DateFormatter did")
+    func dateFormatIsByteIdentical() throws {
+        let legacy = ISO8601DateFormatter()
+        legacy.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<5000 {
+            let milliseconds = Int64.random(in: 0...4_102_444_800_000, using: &generator)
+            let date = DeviceClaimStore.storedPrecision(Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+            let written = DeviceClaimStore.storedString(date)
+            #expect(written == legacy.string(from: date))
+            #expect(DeviceClaimStore.storedDate(written) == legacy.date(from: written))
+            #expect(DeviceClaimStore.storedDate(written) == date)
+        }
+        #expect(DeviceClaimStore.storedString(Date(timeIntervalSince1970: 4_070_908_800.123)) == "2099-01-01T00:00:00.123Z")
+        #expect(DeviceClaimStore.storedDate("2099-01-01T01:00:00Z") == ISO8601DateFormatter().date(from: "2099-01-01T01:00:00Z"))
+        #expect(DeviceClaimStore.storedDate("not a date") == nil)
+    }
+
+    @Test("A renew racing the acquire that reaps its expired claim never overwrites the new holder")
+    func renewRacingAcquire() throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let store = store(scratch, ttl: 60)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        for round in 0..<200 {
+            let device = "device-\(round)"
+            let original = try store.acquire(platform: .ios, deviceID: device, owner: "first", now: start)
+            let later = start.addingTimeInterval(120)
+            let renewed = Mutex<Bool>(false)
+            let acquired = Mutex<DeviceClaim?>(nil)
+            DispatchQueue.concurrentPerform(iterations: 2) { index in
+                if index == 0 {
+                    renewed.withLock { $0 = (try? store.renew(original, now: later)) != nil }
+                } else {
+                    acquired.withLock { $0 = try? store.acquire(platform: .ios, deviceID: device, owner: "second", now: later) }
+                }
+            }
+            let winner = acquired.withLock { $0 }
+            let stored = try #require(store.claim(forDevice: device, now: later))
+            #expect(!(renewed.withLock { $0 } && winner != nil))
+            if let winner { #expect(stored.id == winner.id) } else { #expect(stored.id == original.id) }
+        }
+    }
+
     @Test("A second session lock on the same device is refused until released")
     func sessionLock() throws {
         let scratch = try TemporaryDirectory()
