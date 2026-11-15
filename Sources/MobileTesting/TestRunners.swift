@@ -264,7 +264,7 @@ public enum GradleTestResults {
         var runs: [ParsedTestRun] = []
         for directory in directories {
             runs.append(
-                try await AndroidJUnitTestParser().parse(
+                try await JUnitTestParser().parse(
                     reportDirectory: directory.path, runner: runner, framework: framework, identityRoot: projectDirectory))
         }
         let destinations = runs.flatMap(\.destinations).reduce(into: [TestDestination]()) { if !$0.contains($1) { $0.append($1) } }
@@ -518,7 +518,7 @@ public struct BazelTestRunner: Sendable {
         var runs: [ParsedTestRun] = []
         for test in finalAttempts {
             for file in test.junitFiles where FileManager.default.fileExists(atPath: file) {
-                let parsed = try await AndroidJUnitTestParser().parse(reportDirectory: file, runner: .other("bazel"))
+                let parsed = try await JUnitTestParser().parse(reportDirectory: file, runner: .other("bazel"))
                 runs.append(parsed)
             }
         }

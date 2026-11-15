@@ -5,12 +5,12 @@ import Testing
 
 @testable import MobileTesting
 
-@Suite("AndroidJUnitTestParser")
-struct AndroidJUnitTestParserTests {
+@Suite("JUnitTestParser")
+struct JUnitTestParserTests {
 
     @Test("A large single report keeps every case in its own suite and counts every status once")
     func largeReportGroupsSuites() async throws {
-        let scratch = try TemporaryDirectory(prefix: "AndroidJUnitTestParserLarge")
+        let scratch = try TemporaryDirectory(prefix: "JUnitTestParserLarge")
         defer { try? scratch.remove() }
         let directory = scratch.url.appendingPathComponent("app/build/test-results/test", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -28,7 +28,7 @@ struct AndroidJUnitTestParserTests {
         xml += "</testsuites>\n"
         try Data(xml.utf8).write(to: directory.appendingPathComponent("TEST-all.xml"))
 
-        let run = try await AndroidJUnitTestParser().parse(reportDirectory: directory.path, identityRoot: scratch.url.path)
+        let run = try await JUnitTestParser().parse(reportDirectory: directory.path, identityRoot: scratch.url.path)
         #expect(run.testCases.count == suiteCount * casesPerSuite)
         #expect(run.summary.failed == suiteCount)
         #expect(run.summary.passed == suiteCount * (casesPerSuite - 1))
@@ -41,7 +41,7 @@ struct AndroidJUnitTestParserTests {
 
     @Test("Parses Gradle JUnit XML files into normalized suites and test cases")
     func parsesJUnitDirectory() async throws {
-        let scratch = try TemporaryDirectory(prefix: "AndroidJUnitTestParser")
+        let scratch = try TemporaryDirectory(prefix: "JUnitTestParser")
         defer { try? scratch.remove() }
         let root = scratch.url
 
@@ -66,7 +66,7 @@ struct AndroidJUnitTestParserTests {
             encoding: .utf8
         )
 
-        let parser = AndroidJUnitTestParser()
+        let parser = JUnitTestParser()
         let run = try await parser.parse(reportDirectory: reportDirectory.path)
 
         #expect(run.runner == .gradle)
@@ -89,8 +89,8 @@ struct AndroidJUnitTestParserTests {
         let root = scratch.url
 
         do {
-            _ = try await AndroidJUnitTestParser().parse(reportDirectory: root.path)
-            Issue.record("Expected AndroidJUnitTestParser to throw for an empty directory")
+            _ = try await JUnitTestParser().parse(reportDirectory: root.path)
+            Issue.record("Expected JUnitTestParser to throw for an empty directory")
         } catch let error as MobileKitError {
             guard case .invalidRequest = error else {
                 Issue.record("Expected invalidRequest, got \(error)")
