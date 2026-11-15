@@ -16,10 +16,13 @@ import Glibc
 /// same directory: field names, the lowercase platform, and ISO-8601 dates with fractional
 /// seconds must stay stable.
 public struct DeviceClaim: Codable, Equatable, Sendable {
+    /// Stable identifier for this claim.
     public var id: String
+    /// Device platform, encoded as its lowercase raw value.
     public var platform: MobilePlatform
     /// Simulator UDID or adb serial.
     public var deviceID: String
+    /// Optional display name.
     public var deviceName: String?
     /// A port the holder serves on for this device, if any.
     public var port: Int?
@@ -27,12 +30,16 @@ public struct DeviceClaim: Codable, Equatable, Sendable {
     public var holderPID: Int32?
     /// Whether the claim's holder booted the device, so it may shut it down on release.
     public var bootedByLease: Bool
+    /// Optional installed app identifier associated with the claim.
     public var appID: String?
     /// Free-form caller label shown to anyone refused.
     public var owner: String?
+    /// Claim creation time.
     public var createdAt: Date
+    /// Claim expiry time.
     public var expiresAt: Date
 
+    /// Creates a claim record with the supplied identity and expiry.
     public init(
         id: String,
         platform: MobilePlatform,
@@ -59,6 +66,7 @@ public struct DeviceClaim: Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
     }
 
+    /// Whether this claim has expired at `now`.
     public func isExpired(at now: Date = Date()) -> Bool {
         now >= expiresAt
     }
@@ -87,6 +95,7 @@ public struct DeviceClaimStore: Sendable {
     public let reaper: (@Sendable (DeviceClaim) -> Void)?
     private let logger = Logger.forType(DeviceClaimStore.self)
 
+    /// Creates a store at `directory`; cooperating processes must use the same directory.
     public init(
         directory: URL,
         ttl: TimeInterval = Self.defaultTTL,
@@ -117,14 +126,17 @@ public struct DeviceClaimStore: Sendable {
         stored().sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// The active claim for `deviceID`, or `nil` if it is absent or expired.
     public func claim(forDevice deviceID: String, now: Date = Date()) -> DeviceClaim? {
         read(fileURL(deviceID: deviceID)).flatMap { $0.isExpired(at: now) ? nil : $0 }
     }
 
+    /// An active claim with this claim identifier, if present.
     public func claim(id: String, now: Date = Date()) -> DeviceClaim? {
         all(now: now).first { $0.id == id }
     }
 
+    /// Whether the device is free, owned by `claimID`, or held by another claim.
     public func access(deviceID: String, presenting claimID: String?, now: Date = Date()) -> ClaimAccess {
         guard let claim = claim(forDevice: deviceID, now: now) else { return .free }
         return claim.id == claimID ? .owned(claim) : .claimedByOther(claim)
@@ -135,7 +147,7 @@ public struct DeviceClaimStore: Sendable {
     /// Claims a device. Two processes racing for it cannot both win: the claim file is published
     /// with an exclusive hard link, so readers only ever see a complete record.
     ///
-    /// - Throws: ``MobileKitError/deviceClaimed(device:holder:)`` when someone else holds it.
+    /// - Throws: `MobileKitError.deviceClaimed` when someone else holds it.
     public func acquire(
         platform: MobilePlatform,
         deviceID: String,
@@ -165,6 +177,8 @@ public struct DeviceClaimStore: Sendable {
     /// overwrite a claim someone else now holds.
     @discardableResult
     public func renew(_ claim: DeviceClaim, now: Date = Date()) throws -> DeviceClaim {
+        let lock = try DeviceSessionLock(deviceID: claim.deviceID, store: self)
+        defer { lock.release() }
         guard read(fileURL(deviceID: claim.deviceID))?.id == claim.id else {
             throw MobileKitError.notFound("Claim \(claim.id) on \(claim.deviceID) no longer exists")
         }
@@ -317,7 +331,7 @@ public final class DeviceSessionLock: Sendable {
     private let descriptor: Mutex<Int32>
     public let deviceID: String
 
-    /// - Throws: ``MobileKitError/deviceClaimed(device:holder:)`` when another session holds it.
+    /// - Throws: `MobileKitError.deviceClaimed` when another session holds it.
     public init(deviceID: String, store: DeviceClaimStore) throws {
         try FileManager.default.createDirectory(
             at: store.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -332,6 +346,7 @@ public final class DeviceSessionLock: Sendable {
         self.descriptor = Mutex(file)
     }
 
+    /// Releases the kernel lock. The lock file remains for safe coordination with other processes.
     public func release() {
         descriptor.withLock { file in
             if file >= 0 {
