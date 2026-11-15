@@ -18,7 +18,7 @@ extension PhysicalIOSDeviceManager {
     /// Runs `ctl` with its JSON on stdout and decodes it.
     ///
     /// Logs before and after the run and on failure, with the operation name and device id but never
-    /// arguments or payloads. A CoreDevice error becomes ``MobileKitError/coreDeviceFailed(_:)``.
+    /// arguments or payloads. A CoreDevice error becomes `MobileKitError.coreDeviceFailed`.
     @discardableResult
     func perform(
         _ ctl: DeviceCtl,

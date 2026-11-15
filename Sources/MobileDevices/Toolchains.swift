@@ -110,7 +110,7 @@ public struct XcodeToolchain: Sendable, Equatable {
     /// `17E192`.
     public var build: String?
 
-    /// Reads the active Xcode, or throws ``MobileKitError/unsupportedHost(_:)`` when there is none.
+    /// Reads the active Xcode, or throws `MobileKitError.unsupportedHost` when there is none.
     public static func current(shell: ShellContext = .init()) async throws -> XcodeToolchain {
         #if !os(macOS)
         throw MobileKitError.unsupportedHost("Xcode is only available on macOS")

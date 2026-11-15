@@ -127,7 +127,39 @@ struct DeviceClaimStoreTests {
         #expect(claim.holderPID == 4242)
         #expect(claim.platform == .ios)
         let encoded = try #require(String(bytes: DeviceClaimStore.encoder.encode(claim), encoding: .utf8))
-        #expect(encoded.contains(#""createdAt" : "2099-01-01T00:00:00.123Z""#))
+        #expect(
+            encoded
+                == """
+                {
+                  "appID" : "com.jot",
+                  "bootedByLease" : true,
+                  "createdAt" : "2099-01-01T00:00:00.123Z",
+                  "deviceID" : "A1B2",
+                  "expiresAt" : "2099-01-01T01:00:00.000Z",
+                  "holderPID" : 4242,
+                  "id" : "lease-abcd1234",
+                  "owner" : "shipit pid 1",
+                  "platform" : "ios",
+                  "port" : 22087
+                }
+                """)
+    }
+
+    @Test("Renew cannot race acquisition while another session holds the device lock")
+    func renewUsesDeviceLock() throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        let store = store(scratch)
+        let expired = try store.acquire(platform: .android, deviceID: "S", now: Date().addingTimeInterval(-3600))
+        let lock = try DeviceSessionLock(deviceID: "S", store: store)
+        #expect(throws: MobileKitError.self) { try store.renew(expired) }
+        #expect(store.allIncludingExpired() == [expired])
+
+        lock.release()
+        let acquired = try store.acquire(platform: .android, deviceID: "S")
+        #expect(acquired.id != expired.id)
+        #expect(throws: MobileKitError.self) { try store.renew(expired) }
+        #expect(store.claim(forDevice: "S") == acquired)
     }
 
     @Test("A second session lock on the same device is refused until released")

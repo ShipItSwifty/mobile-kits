@@ -135,7 +135,7 @@ public enum TestDestinationKind: String, Codable, Sendable, Hashable {
 /// test plan, one Gradle test task, or the host machine.
 ///
 /// Every test and suite under a destination shares its platform, so results list destinations once and tests
-/// refer to them by ``id``. (Not an Xcode *target*, which is a module, or ``CoverageTarget``.)
+/// refer to them by ``id``. (Not an Xcode *target*, which is a module, or a coverage target.)
 public struct TestDestination: Codable, Sendable, Hashable {
     /// Stable within a run and across machines: built from what identifies the environment, never from
     /// absolute paths or process identifiers.

@@ -8,13 +8,16 @@ import FoundationXML
 
 /// Reads JUnit XML from a file or directory, preserving failures, errors, and output.
 ///
+/// Gradle (JVM and connected Android tests), Bazel, and `swift test --xunit-output` all write this
+/// format; `runner` says which one produced it. Formerly `AndroidJUnitTestParser`.
+///
 /// ## Usage
 /// ```swift
-/// let run = try await AndroidJUnitTestParser().parse(reportDirectory: "app/build/test-results")
+/// let run = try await JUnitTestParser().parse(reportDirectory: "app/build/test-results")
 /// ```
-public struct AndroidJUnitTestParser: Sendable {
+public struct JUnitTestParser: Sendable {
     private let logger: Logger
-    public init(logger: Logger = Logger(label: "MobileKits.AndroidJUnitTestParser")) { self.logger = logger }
+    public init(logger: Logger = Logger(label: "MobileKits.JUnitTestParser")) { self.logger = logger }
 
     /// Parses JUnit XML at `reportDirectory`.
     ///
@@ -148,7 +151,7 @@ public struct AndroidJUnitTestParser: Sendable {
             suites: suites, testCases: cases, diagnostics: diagnostics)
     }
 }
-extension AndroidJUnitTestParser {
+extension JUnitTestParser {
     /// Folds the attempts a retry plugin wrote as separate `testcase` entries into one result per test.
     ///
     /// The deciding attempt is the last one. The folded test keeps how many executions it took (`retries`), the
@@ -241,7 +244,7 @@ extension AndroidJUnitTestParser {
         return metadata
     }
 }
-extension AndroidJUnitTestParser: TestResultParser {
+extension JUnitTestParser: TestResultParser {
     public func parse(_ input: String) async throws -> ParsedTestRun { try await parse(reportDirectory: input) }
 }
 

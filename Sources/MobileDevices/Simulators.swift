@@ -85,6 +85,7 @@ public struct SimulatorManager: Sendable {
     let shell: ShellContext
     let logger = Logger.forType(SimulatorManager.self)
 
+    /// Creates a manager that uses `shell` to invoke Apple's simulator tools.
     public init(shell: ShellContext = .init()) {
         self.shell = shell
     }
@@ -217,11 +218,13 @@ public struct SimulatorManager: Sendable {
 
     // MARK: - Apps
 
+    /// Installs an `.app` bundle on a simulator. This mutates the simulator.
     public func install(appAt path: String, on udid: String) async throws {
         logger.info("Installing app on simulator", metadata: ["udid": "\(udid)"])
         try await ToolRunner.run(Simctl(context: shell).install(udid, appAt: path), timeout: .seconds(300))
     }
 
+    /// Uninstalls an app from a simulator. This mutates the simulator.
     public func uninstall(bundleID: String, from udid: String) async throws {
         try await ToolRunner.run(Simctl(context: shell).uninstall(udid, bundleIdentifier: bundleID), timeout: .seconds(60))
     }

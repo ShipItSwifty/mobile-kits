@@ -127,7 +127,7 @@ public struct XcodeTestRunner: Sendable {
     }
 
     /// `xcodebuild test-without-building -testProductsPath <bundle>`, reusing the `.xctestproducts`
-    /// bundle ``XcodeBuilder/buildForTesting(_:testProductsPath:)`` wrote.
+    /// bundle `XcodeBuilder.buildForTesting` wrote.
     public func testWithoutBuilding(
         testProducts: String,
         destination: XcodeDestination,
@@ -264,7 +264,7 @@ public enum GradleTestResults {
         var runs: [ParsedTestRun] = []
         for directory in directories {
             runs.append(
-                try await AndroidJUnitTestParser().parse(
+                try await JUnitTestParser().parse(
                     reportDirectory: directory.path, runner: runner, framework: framework, identityRoot: projectDirectory))
         }
         let destinations = runs.flatMap(\.destinations).reduce(into: [TestDestination]()) { if !$0.contains($1) { $0.append($1) } }
@@ -272,7 +272,8 @@ public enum GradleTestResults {
             runner: runner, framework: framework, source: projectDirectory, destinations: destinations,
             summary: TestSummary(
                 passed: runs.reduce(0) { $0 + $1.summary.passed }, failed: runs.reduce(0) { $0 + $1.summary.failed },
-                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, errored: runs.reduce(0) { $0 + $1.summary.errored }),
+                skipped: runs.reduce(0) { $0 + $1.summary.skipped }, flaky: runs.reduce(0) { $0 + $1.summary.flaky },
+                errored: runs.reduce(0) { $0 + $1.summary.errored }),
             suites: runs.flatMap(\.suites), testCases: runs.flatMap(\.testCases), diagnostics: runs.flatMap(\.diagnostics))
     }
 }
@@ -518,7 +519,7 @@ public struct BazelTestRunner: Sendable {
         var runs: [ParsedTestRun] = []
         for test in finalAttempts {
             for file in test.junitFiles where FileManager.default.fileExists(atPath: file) {
-                let parsed = try await AndroidJUnitTestParser().parse(reportDirectory: file, runner: .other("bazel"))
+                let parsed = try await JUnitTestParser().parse(reportDirectory: file, runner: .other("bazel"))
                 runs.append(parsed)
             }
         }

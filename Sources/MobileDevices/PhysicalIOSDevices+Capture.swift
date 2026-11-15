@@ -9,7 +9,7 @@ extension PhysicalIOSDeviceManager {
 
     /// Captures a screenshot to `path` (a `.png`) and describes it.
     ///
-    /// - Parameter displayUniqueID: A display from ``displays(on:)``; the primary display by default.
+    /// - Parameter displayUniqueID: A display from `displays(on:)`; the primary display by default.
     @discardableResult
     public func captureScreenshot(
         on udid: String,
@@ -94,7 +94,7 @@ extension PhysicalIOSDeviceManager {
     ///
     /// - Parameters:
     ///   - sources: Host paths to transfer.
-    ///   - domain: The device file domain, such as ``CoreDeviceFileDomain/appData(bundleID:)``.
+    ///   - domain: The device file domain, such as `.appData(bundleID:)`.
     ///   - destination: The device location, relative to the domain.
     public func copyToDevice(
         sources: [String],

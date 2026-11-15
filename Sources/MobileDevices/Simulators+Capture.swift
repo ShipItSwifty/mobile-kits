@@ -47,7 +47,7 @@ extension SimulatorManager {
 
     /// Starts `simctl io <udid> recordVideo --codec=h264 --force <outputPath>` and returns its pid.
     ///
-    /// The recording runs until ``stopRecording(pid:)``. The process stays tracked in a registry
+    /// The recording runs until `stopRecording(pid:)`. The process stays tracked in a registry
     /// shared by every `SimulatorManager`, so a different instance (or call stack) can stop it by pid.
     /// The mp4 is only finalized once the process receives SIGINT, which `stopRecording` sends.
     public func startRecording(on udid: String, to outputPath: String) async throws -> Int32 {

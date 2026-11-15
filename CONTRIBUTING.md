@@ -13,6 +13,14 @@
 CI builds and tests on macOS and on Linux with the oldest supported Swift (6.2) and the latest,
 and builds the DocC site on every pull request.
 
+When capturing real tool output for a parser test, add a scrubbed fixture under the relevant
+`Tests/<Product>Tests/Fixtures/real/` directory and update its `README.md` with the source command
+or tool and any redactions. Keep synthetic fixtures separate from real output.
+
+To develop against an unpublished `cli-wrappers` checkout, place that checkout beside this one and
+run `swift package edit cli-wrappers --path ../cli-wrappers`. Do not commit generated dependency
+state. Run `swift package unedit cli-wrappers` to return to the declared remote dependency.
+
 Releases are bare SemVer tags (`0.1.0`, no `v`). Pushing a tag publishes a GitHub Release with
 generated notes; there is no `CHANGELOG.md`.
 

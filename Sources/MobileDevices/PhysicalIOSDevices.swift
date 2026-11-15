@@ -11,19 +11,24 @@ public struct PhysicalIOSDevice: Codable, Sendable, Hashable, Identifiable {
     public var udid: String
     /// CoreDevice identifier.
     public var identifier: String
+    /// Device name reported by `devicectl`.
     public var name: String
     /// `iOS`, `watchOS`, `tvOS`, `macOS`, `xrOS`.
     public var platform: String
+    /// Operating-system version when reported.
     public var osVersion: String?
+    /// Device model when reported.
     public var model: String?
     /// `wired`, `localNetwork`, `sameMachine` for a simulator, ….
     public var transport: String?
     /// Whether a CoreDevice tunnel is up, i.e. the device can be driven right now.
     public var isConnected: Bool
+    /// Whether Developer Mode is enabled, when reported.
     public var developerModeEnabled: Bool?
     /// `physical`, or `simulated` for a simulator Xcode 27's devicectl lists. Older versions omit it.
     public var reality: String?
 
+    /// The device's UDID, used as its stable identity in collections.
     public var id: String { udid }
 
     /// Whether this is a simulator addressed through CoreDevice rather than hardware.
@@ -96,13 +101,14 @@ public struct PhysicalIOSDevice: Codable, Sendable, Hashable, Identifiable {
 /// Operations are grouped across the `PhysicalIOSDevices+*.swift` files: information, processes,
 /// capture and files, settings, simulation, pasteboard and notifications, and management. Results
 /// with an observed JSON shape are typed; the rest return a ``DeviceCtlResponse``. A CoreDevice error
-/// is thrown as ``MobileKitError/coreDeviceFailed(_:)`` with its code, so a caller can tell an
+/// is thrown as `MobileKitError.coreDeviceFailed` with its code, so a caller can tell an
 /// unsupported capability from a missing device. Operations that never end on their own return the
 /// spawned process for the caller to stop.
 public struct PhysicalIOSDeviceManager: Sendable {
     let shell: ShellContext
     let logger = Logger.forType(PhysicalIOSDeviceManager.self)
 
+    /// Creates a manager that uses `shell` to invoke `devicectl` and `iproxy`.
     public init(shell: ShellContext = .init()) {
         self.shell = shell
     }
@@ -140,6 +146,9 @@ public struct PhysicalIOSDeviceManager: Sendable {
 
     /// Installs an `.app` bundle. The result carries the installed app's `launchServicesIdentifier`,
     /// which ``CoreDeviceLaunchOptions`` accepts as `launchPersistentIdentifier`.
+    /// Installs an `.app` bundle on a device. This mutates the device.
+    ///
+    /// - Returns: The devicectl response, including the launch-services identifier when reported.
     @discardableResult
     public func install(appAt path: String, on udid: String, columns: CoreDeviceColumnOptions = .init()) async throws -> DeviceCtlResponse {
         logger.info("Installing app on device", metadata: ["udid": "\(udid)"])
@@ -150,6 +159,7 @@ public struct PhysicalIOSDeviceManager: Sendable {
         return response
     }
 
+    /// Uninstalls an app from a device. This mutates the device.
     public func uninstall(bundleID: String, from udid: String) async throws {
         logger.info("Uninstalling app from device", metadata: ["udid": "\(udid)"])
         try await perform(

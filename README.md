@@ -30,7 +30,15 @@ Pre-1.0, track `main`:
 .package(url: "https://github.com/ShipItSwifty/mobile-kits.git", branch: "main"),
 ```
 
-Swift 6.2+, macOS 15+ or Linux. On Linux, Apple-only operations throw `MobileKitError.unsupportedHost`.
+Swift 6.2+, macOS 15+ or Linux. CI tests with Xcode 26.4 on macOS and Swift 6.2 and 6.4 on Linux;
+the package does not pin a minimum version for Android SDK tools or `iproxy`, so use versions
+compatible with the operations you call. On Linux, explicitly host-guarded Apple-only operations
+throw `MobileKitError.unsupportedHost`.
+
+Install the tools used by the operations you call: Xcode (including `xcodebuild`, `simctl`,
+`devicectl`, and `xcresulttool`) for Apple builds and results; Android SDK Platform-Tools (`adb`)
+and, for emulators, Android Emulator and command-line tools; and `iproxy` for USB port forwarding.
+Flutter, Node/Jest, Gradle, and Bazel operations also require their respective toolchains.
 
 ## Examples
 
@@ -66,6 +74,44 @@ let execution = try await XcodeTestRunner().testWithoutBuilding(
     xctestrun: xctestrun, destination: .simulator(udid: phone.udid), resultBundlePath: "build/run.xcresult")
 print(execution.run.summary)
 ```
+
+For a connected physical iOS device, list available devices and install a built app. Installation
+changes device state; `uninstall` is also available on the manager.
+
+```swift
+import MobileDevices
+
+let devices = try await PhysicalIOSDeviceManager().list(connectedOnly: true)
+if let phone = devices.first {
+    let manager = PhysicalIOSDeviceManager()
+    let response = try await manager.install(appAt: "build/App.app", on: phone.udid)
+    print(response.commandType)
+}
+```
+
+Read an existing test artifact without choosing its parser yourself:
+
+```swift
+import MobileTesting
+
+let run = try await NativeResultReader().read("build/run.xcresult")
+print(run.summary)
+```
+
+Inspect a repository without executing its build scripts:
+
+```swift
+import MobileProject
+
+let inspection = RepositoryInspector().inspect("/path/to/project")
+for candidate in inspection.frameworks {
+    print(candidate.value, candidate.evidence)
+}
+```
+
+**Errors:** core and device operations report `MobileKitError`; build operations throw
+`BuildFailure` when a build ran but failed; test runners throw `TestExecutionFailure` when no
+usable test results were produced. Test failures themselves remain in `TestExecution.run`.
 
 ## Documentation
 

@@ -199,7 +199,7 @@ public struct XcodeBuilder: Sendable {
     }
 
     /// `xcodebuild build-for-testing -testProductsPath <path>`: builds the app and test bundles once
-    /// into one `.xctestproducts` bundle that ``XcodeTestRunner`` runs any number of times, on any
+    /// into one `.xctestproducts` bundle that `XcodeTestRunner` runs any number of times, on any
     /// destination of the same platform, without the project.
     ///
     /// Unlike ``buildForTesting(_:)`` this reads no build settings: the test-products bundle is the

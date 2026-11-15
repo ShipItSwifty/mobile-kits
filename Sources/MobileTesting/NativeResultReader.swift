@@ -59,7 +59,7 @@ public struct NativeResultReader: Sendable {
             throw MobileKitError.unsupportedHost("Reading .xcresult bundles requires macOS and Xcode.")
             #endif
         case .junit:
-            run = try await AndroidJUnitTestParser().parse(
+            run = try await JUnitTestParser().parse(
                 reportDirectory: path, runner: runner ?? .gradle, framework: framework,
                 identityRoot: Self.gradleProjectRoot(containing: path))
         case .flutter:
