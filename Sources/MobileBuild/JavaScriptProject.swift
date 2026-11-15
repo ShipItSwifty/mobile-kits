@@ -79,9 +79,13 @@ public struct JavaScriptProject: Sendable {
     /// Runs a `package.json` script (`<manager> run <script> -- <arguments>`) and returns its
     /// output whatever the exit status: a failing test script is a result, not an error.
     ///
+    /// - Parameters:
+    ///   - output: Where the script's output goes while it runs; captured by default.
+    ///   - timeout: Limit for the script; exceeding it throws ``MobileKitError/timedOut(operation:seconds:)``.
     /// - Throws: ``MobileKitError/notFound(_:)`` when `package.json` has no such script.
     public func run(
-        script name: String, arguments: [String] = [], environment: [String: String] = [:], timeout: Duration? = nil
+        script name: String, arguments: [String] = [], environment: [String: String] = [:], output: BuildOutput = .init(),
+        timeout: Duration? = nil
     ) async throws -> ShellOutput {
         try await installDependenciesIfNeeded()
         // Refuse only a readable package.json that lacks the script; an unreadable one is left to
@@ -93,6 +97,8 @@ public struct JavaScriptProject: Sendable {
             .args(["run", name] + (arguments.isEmpty ? [] : ["--"] + arguments))
             .workingDirectory(root)
             .env(environment)
+            .stdout(output.stdout)
+            .stderr(output.stderr)
             .outputLimit(0)
             .timeout(timeout)
         do {

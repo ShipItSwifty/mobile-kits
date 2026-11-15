@@ -237,6 +237,28 @@ struct TestRunnerTests {
         #expect(execution.exitCode == 3)
     }
 
+    @Test("Jest and Flutter runners pass the caller's output destinations to the command")
+    func streamingDestinations() async throws {
+        let scratch = try TemporaryDirectory()
+        defer { try? scratch.remove() }
+        try Data(#"{"scripts": {"test": "jest"}}"#.utf8).write(to: scratch.url.appending(path: "package.json"))
+        try FileManager.default.createDirectory(at: scratch.url.appending(path: "node_modules"), withIntermediateDirectories: true)
+        let seen = Mutex<[String]>([])
+        let executor = MockExecutor { command, _ in
+            let streams = "\(command.stdoutDestination)|\(command.stderrDestination)"
+            seen.withLock { $0.append("\(command.executableName):\(streams)") }
+            return ShellOutput(exitCode: 1)
+        }
+        let project = JavaScriptProject(root: scratch.url.path, shell: ShellContext(executor: executor))
+        _ = try? await JestTestRunner(shell: ShellContext(executor: executor), output: .streamingToStderr).run(project: project)
+        _ = try? await FlutterTestRunner(shell: ShellContext(executor: executor), output: .streamingToStderr)
+            .runUnitTests(in: scratch.url.path)
+        let calls = seen.withLock { $0 }
+        let tee = "\(OutputDestination.teeTo(.stderr))"
+        #expect(calls.count == 2)
+        #expect(calls.allSatisfy { $0.hasSuffix("\(tee)|\(tee)") }, "Every command streams to stderr: \(calls)")
+    }
+
     @Test("Jest needs the script to run Jest")
     func jestRequiresJest() async throws {
         let scratch = try TemporaryDirectory()
