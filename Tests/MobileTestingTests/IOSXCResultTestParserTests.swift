@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import SwiftyShell
+import Synchronization
 import Testing
 
 import MobileCore
@@ -77,7 +78,7 @@ struct IOSXCResultTestParserTests {
                 == .xcodeOnlyTesting("MyAppTests/LoginTests/testFailedLogin()"))
     }
 
-    @Test("Surfaces xcresulttool failures as invalid configuration")
+    @Test("Surfaces xcresulttool failures as a failed command")
     func surfacesXCResultToolFailures() async throws {
         let executor = MockExecutor { _, _ in
             throw ShellError.exitFailure(
@@ -91,10 +92,12 @@ struct IOSXCResultTestParserTests {
             _ = try await parser.parse(xcresultPath: "/tmp/missing.xcresult")
             Issue.record("Expected IOSXCResultTestParser to throw")
         } catch let error as MobileKitError {
-            guard case .invalidRequest = error else {
-                Issue.record("Expected invalidRequest, got \(error)")
+            guard case .commandFailed(_, let exitCode, let output) = error else {
+                Issue.record("Expected commandFailed, got \(error)")
                 return
             }
+            #expect(exitCode == 64)
+            #expect(output.contains("bundle not found"))
         }
     }
     @Test("Modern configuration leaves retain independent outcomes, target selectors and messages")
@@ -123,6 +126,57 @@ struct IOSXCResultTestParserTests {
         #expect(failure.metadata?["runtime"] == "27.2")
         #expect(failure.message == "XCTAssertEqual failed")
         #expect(failure.rerunSelector == .xcodeOnlyTesting("AppUITests/Suite/test()"))
+    }
+
+    @Test("Per-test reads are collected up front and each test keeps its own runs")
+    func perTestReadsKeepTheirOwnRuns() async throws {
+        let count = 24
+        let nodes = (0..<count).map {
+            "{\"nodeType\":\"Test Case\",\"nodeIdentifier\":\"Suite/test\($0)()\",\"result\":\"Failed\"}"
+        }.joined(separator: ",")
+        let detailCalls = Mutex(0)
+        let executor = MockExecutor { command, _ in
+            if command.arguments.contains("summary") {
+                return .init(stdout: "{\"failedTests\":\(count),\"passedTests\":0}", stderr: "", exitCode: 0)
+            }
+            if command.arguments.contains("test-details") {
+                detailCalls.withLock { $0 += 1 }
+                let id = command.arguments[(command.arguments.firstIndex(of: "--test-id") ?? 0) + 1]
+                return .init(
+                    stdout: """
+                        {"testRuns":[{"nodeType":"Test Plan Configuration","name":"English","result":"Failed","children":[{"nodeType":"Failure Message","name":"failed \(id)"}]},{"nodeType":"Test Plan Configuration","name":"German","result":"Passed"}]}
+                        """, stderr: "", exitCode: 0)
+            }
+            return .init(
+                stdout: """
+                    {"devices":[{"deviceName":"Phone","deviceId":"UDID","osVersion":"27.2"}],"testPlanConfigurations":[{"configurationName":"English"},{"configurationName":"German"}],"testNodes":[{"nodeType":"UI test bundle","name":"AppUITests","children":[\(nodes)]}]}
+                    """, stderr: "", exitCode: 0)
+        }
+        let run = try await IOSXCResultTestParser(shell: ShellContext(executor: executor), maxConcurrentReads: 4)
+            .parse(xcresultPath: "sample.xcresult")
+        #expect(detailCalls.withLock { $0 } == count)
+        #expect(run.testCases.count == count * 2)
+        #expect(run.summary.failed == count)
+        #expect(run.summary.passed == count)
+        for index in 0..<count {
+            let failure = run.testCases.first { $0.status == .failed && $0.message == "failed Suite/test\(index)()" }
+            #expect(failure != nil)
+        }
+    }
+
+    @Test("Test-case ids are collected once in document order and splice only replaces non-empty run lists")
+    func collectAndSplice() throws {
+        let json = try JSONDecoder().decode(
+            JSONValue.self,
+            from: Data(
+                """
+                {"testNodes":[{"nodeType":"Unit test bundle","children":[{"nodeType":"Test Case","nodeIdentifier":"A/a()","children":[{"nodeType":"Old"}]},{"nodeType":"Test Case","nodeIdentifier":"A/b()"},{"nodeType":"Test Case","nodeIdentifier":"A/a()"}]}]}
+                """.utf8))
+        #expect(IOSXCResultTestParser.testCaseIDs(in: json) == ["A/a()", "A/b()"])
+        let spliced = IOSXCResultTestParser.splice(["A/a()": [.object(["nodeType": .string("New")])], "A/b()": []], into: json)
+        let rendered = String(decoding: try JSONEncoder().encode(spliced), as: UTF8.self)
+        #expect(rendered.contains("New"))
+        #expect(!rendered.contains("Old"))
     }
 
     @Test("Each result-bundle device becomes a destination and its tests point at it")

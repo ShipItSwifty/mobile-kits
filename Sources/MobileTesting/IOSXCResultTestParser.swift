@@ -15,13 +15,24 @@ import XcrunKit
 public struct IOSXCResultTestParser: Sendable {
     private let shell: ShellContext
     private let logger: Logger
+    private let timeout: Duration
+    private let maxConcurrentReads: Int
 
+    /// - Parameters:
+    ///   - timeout: Limit for each `xcresulttool` invocation; a stuck read throws
+    ///     ``MobileKitError/timedOut(operation:seconds:)``.
+    ///   - maxConcurrentReads: How many per-test `test-details` reads run at once for bundles with
+    ///     several devices or configurations. The first summary and tests reads stay serial.
     public init(
         shell: ShellContext,
-        logger: Logger = Logger(label: "MobileKits.IOSXCResultTestParser")
+        timeout: Duration = .seconds(120),
+        maxConcurrentReads: Int = 6,
+        logger: Logger? = nil
     ) {
         self.shell = shell
-        self.logger = logger
+        self.timeout = timeout
+        self.maxConcurrentReads = max(1, maxConcurrentReads)
+        self.logger = logger ?? Logger.forType(IOSXCResultTestParser.self)
     }
 
     /// Parses a `.xcresult` bundle into a normalized test run.
@@ -54,54 +65,97 @@ public struct IOSXCResultTestParser: Sendable {
     }
 
     private func enrichRuns(_ value: JSONValue, path: String) async throws -> JSONValue {
+        let ids = Self.testCaseIDs(in: value)
+        guard !ids.isEmpty else { return value }
+        logger.info("Reading per-test runs", metadata: ["tests": "\(ids.count)", "concurrency": "\(maxConcurrentReads)"])
+        let runs = try await fetchRuns(ids: ids, path: path)
+        logger.info("Read per-test runs", metadata: ["tests": "\(runs.count)"])
+        return Self.splice(runs, into: value)
+    }
+
+    /// Fetches `test-details` for every id, at most `maxConcurrentReads` at a time.
+    private func fetchRuns(ids: [String], path: String) async throws -> [String: [JSONValue]] {
+        try await withThrowingTaskGroup(of: (String, [JSONValue]).self) { group in
+            var results: [String: [JSONValue]] = [:]
+            var iterator = ids.makeIterator()
+            func addNext(_ group: inout ThrowingTaskGroup<(String, [JSONValue]), Error>) {
+                guard let id = iterator.next() else { return }
+                group.addTask { (id, try await self.readRuns(id: id, path: path)) }
+            }
+            for _ in 0..<min(maxConcurrentReads, ids.count) { addNext(&group) }
+            while let (id, runs) = try await group.next() {
+                results[id] = runs
+                addNext(&group)
+            }
+            return results
+        }
+    }
+
+    private func readRuns(id: String, path: String) async throws -> [JSONValue] {
+        let output = try await runXCResultTool(arguments: [
+            "get", "test-results", "test-details", "--path", path, "--test-id", id, "--compact",
+        ])
+        let details = try decodeJSON(output.stdout, source: path, command: "test-details")
+        return details.objectValue?.array(for: "testRuns") ?? []
+    }
+
+    /// Identifiers of every test-case node, in document order, without duplicates.
+    static func testCaseIDs(in value: JSONValue) -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+        func walk(_ value: JSONValue) {
+            switch value {
+            case .object(let object):
+                if object.string(for: "nodeType") == "Test Case", let id = object.string(for: "nodeIdentifier") {
+                    if seen.insert(id).inserted { ids.append(id) }
+                } else {
+                    for key in object.keys.sorted() { if let child = object[key] { walk(child) } }
+                }
+            case .array(let values): values.forEach(walk)
+            default: break
+            }
+        }
+        walk(value)
+        return ids
+    }
+
+    /// Replaces the children of each test-case node that has a non-empty run list.
+    static func splice(_ runs: [String: [JSONValue]], into value: JSONValue) -> JSONValue {
         switch value {
         case .object(var object):
             if object.string(for: "nodeType") == "Test Case", let id = object.string(for: "nodeIdentifier") {
-                let output = try await runXCResultTool(arguments: [
-                    "get", "test-results", "test-details", "--path", path, "--test-id", id, "--compact",
-                ])
-                let details = try decodeJSON(output.stdout, source: path, command: "test-details")
-                if let runs = details.objectValue?.array(for: "testRuns"), !runs.isEmpty { object["children"] = .array(runs) }
+                if let found = runs[id], !found.isEmpty { object["children"] = .array(found) }
             } else {
-                for key in object.keys.sorted() { if let child = object[key] { object[key] = try await enrichRuns(child, path: path) } }
+                for key in object.keys.sorted() { if let child = object[key] { object[key] = splice(runs, into: child) } }
             }
             return .object(object)
         case .array(let values):
-            var enriched: [JSONValue] = []
-            for value in values { enriched.append(try await enrichRuns(value, path: path)) }
-            return .array(enriched)
-        default: return value
+            return .array(values.map { splice(runs, into: $0) })
+        default:
+            return value
         }
     }
 
     private func runXCResultTool(arguments: [String]) async throws -> ShellOutput {
-        do {
-            return try await Xcrun(context: shell)
-                .tool("xcresulttool")
-                .trailingArguments(arguments)
-                .command()
-                .run(in: shell)
-        } catch let ShellError.commandNotFound(name) {
-            throw MobileKitError.toolNotFound(name)
-        } catch let ShellError.exitFailure(_, output) {
-            let errorText = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw MobileKitError.invalidRequest(
-                "xcresulttool failed (exit \(output.exitCode)): \(errorText)"
-            )
-        }
+        let command = try Xcrun(context: shell)
+            .tool("xcresulttool")
+            .trailingArguments(arguments)
+            .command()
+            .timeout(timeout)
+        logger.debug("Running xcresulttool", metadata: ["subcommand": "\(arguments.prefix(3).joined(separator: " "))"])
+        return try await ToolRunner.run(command, context: shell)
     }
 
     private func decodeJSON(_ text: String, source: String, command: String) throws -> JSONValue {
         guard let data = text.data(using: .utf8) else {
-            throw MobileKitError.invalidRequest("xcresulttool \(command) output is not valid UTF-8 for \(source)")
+            throw MobileKitError.unexpectedOutput(tool: "xcresulttool", detail: "\(command) output is not valid UTF-8")
         }
 
         do {
             return try JSONDecoder().decode(JSONValue.self, from: data)
         } catch {
-            throw MobileKitError.invalidRequest(
-                "Failed to decode xcresulttool \(command) JSON for \(source): \(error.localizedDescription)"
-            )
+            throw MobileKitError.unexpectedOutput(
+                tool: "xcresulttool", detail: "\(command) JSON for \(source) did not decode: \(error.localizedDescription)")
         }
     }
 }
